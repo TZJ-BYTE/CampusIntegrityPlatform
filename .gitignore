@@ -1,0 +1,10 @@
+/target
+/node_modules
+/frontend/node_modules
+/frontend/dist
+/src-tauri/target
+.idea/
+*.iml
+*.log
+data/
+backups/
