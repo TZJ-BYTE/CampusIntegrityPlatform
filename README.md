@@ -3,6 +3,7 @@
 面向校园廉洁教育场景的离线桌面应用：在 Windows 电脑上双击运行，前后端一体、数据本地化、可复制到新电脑直接使用。
 
 完整设计方案见 [DESIGN.md](file:///d:/project/rustproject/CampusIntegrityPlatform/DESIGN.md)。
+详细开发进度与后续可执行计划见 [DEVELOPMENT_PLAN.md](file:///d:/project/rustproject/CampusIntegrityPlatform/DEVELOPMENT_PLAN.md)。
 
 ## 目标（需求确认）
 

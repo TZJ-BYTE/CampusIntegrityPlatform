@@ -2,11 +2,34 @@
 import { computed, onMounted } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { useAppStore } from '../stores/app'
+import { useContentUpdateStore } from '../stores/contentUpdate'
+import { useSyncStore } from '../stores/sync'
+import { useUiStore } from '../stores/ui'
+import AboutModal from './AboutModal.vue'
+import AccountSheet from './AccountSheet.vue'
+import AuthModal from './AuthModal.vue'
+import DiagnosticsModal from './DiagnosticsModal.vue'
+import ProfileModal from './ProfileModal.vue'
+import SettingsModal from './SettingsModal.vue'
+import ToastHost from './ToastHost.vue'
+import UserMenu from './UserMenu.vue'
+import WelcomeModal from './WelcomeModal.vue'
 
 const route = useRoute()
 const app = useAppStore()
+const sync = useSyncStore()
+const contentUpdate = useContentUpdateStore()
+const ui = useUiStore()
 
 const pageTitle = computed(() => (route.meta?.title as string) ?? '校园廉洁教育平台')
+const syncOnlineLabel = computed(() => {
+  if (!sync.auth?.ok) return '云 —'
+  if (!sync.auth.data.isLoggedIn) return '云 未连接'
+  if (sync.busy) return '云 同步中'
+  if (sync.lastErrorAt && (!sync.lastOkAt || sync.lastErrorAt > sync.lastOkAt)) return '云 异常'
+  return '云 已连接'
+})
+const contentUpdateLabel = computed(() => (contentUpdate.busy ? '内容更新中' : null))
 
 const nav = [
   { to: '/', label: '概览' },
@@ -16,16 +39,34 @@ const nav = [
   { to: '/stories', label: '每日故事' },
   { to: '/quiz', label: '知识竞答' },
   { to: '/favorites', label: '我的收藏' },
-  { to: '/settings', label: '设置' },
 ]
+
+function isActiveNav(to: string) {
+  if (to === '/') return route.path === '/'
+  return route.path === to || route.path.startsWith(`${to}/`)
+}
 
 onMounted(async () => {
   if (!app.status) await app.refreshStatus()
+  try {
+    const onboarded = localStorage.getItem('cip:onboarded') === '1'
+    if (!onboarded && !ui.overlay) ui.open('onboarding')
+  } catch {
+    if (!ui.overlay) ui.open('onboarding')
+  }
 })
 </script>
 
 <template>
   <div class="shell">
+    <WelcomeModal />
+    <AuthModal />
+    <AccountSheet />
+    <SettingsModal />
+    <ProfileModal />
+    <DiagnosticsModal />
+    <AboutModal />
+    <ToastHost />
     <header class="appbar">
       <div class="brand">
         <div class="logo">廉</div>
@@ -40,7 +81,7 @@ onMounted(async () => {
           v-for="i in nav"
           :key="i.to"
           class="navItem"
-          :class="{ active: i.to === route.path }"
+          :class="{ active: isActiveNav(i.to) }"
           :to="i.to"
         >
           {{ i.label }}
@@ -48,12 +89,12 @@ onMounted(async () => {
       </nav>
 
       <div class="actions">
-        <div v-if="app.status?.ok" class="meta">
-          <span class="metaItem">v{{ app.status.data.appVersion }}</span>
-          <span class="metaSep">|</span>
-          <span class="metaItem">内容 {{ app.status.data.contentVersion }}</span>
+        <div class="cloud">
+          <span class="cloudItem">{{ syncOnlineLabel }}</span>
+          <span v-if="contentUpdateLabel" class="cloudSep">·</span>
+          <span v-if="contentUpdateLabel" class="cloudItem">{{ contentUpdateLabel }}</span>
         </div>
-        <button class="btn" type="button" @click="app.refreshStatus">刷新</button>
+        <UserMenu />
       </div>
     </header>
 
@@ -63,7 +104,11 @@ onMounted(async () => {
       </div>
       <section class="body">
         <div class="card">
-          <RouterView />
+          <RouterView v-slot="{ Component, route: r }">
+            <Transition name="page" mode="out-in">
+              <component :is="Component" :key="r.fullPath" />
+            </Transition>
+          </RouterView>
         </div>
       </section>
     </main>
@@ -72,13 +117,16 @@ onMounted(async () => {
 
 <style scoped>
 .shell {
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
-  grid-template-rows: 64px 1fr;
+  grid-template-rows: auto 1fr;
   background: var(--bg-page);
 }
 
 .appbar {
+  position: sticky;
+  top: 0;
+  z-index: 1200;
   background: var(--primary);
   color: var(--white);
   display: flex;
@@ -156,38 +204,27 @@ onMounted(async () => {
   gap: 10px;
 }
 
-.meta {
+.cloud {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   white-space: nowrap;
 }
 
-.metaItem {
+.cloudItem {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.9);
 }
 
-.metaSep {
-  opacity: 0.85;
-}
-
-.btn {
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: var(--white);
-  border-radius: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-.btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+.cloudSep {
+  opacity: 0.9;
 }
 
 .main {
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .pageHead {
@@ -203,6 +240,8 @@ onMounted(async () => {
 .body {
   padding: 12px 16px 16px;
   overflow: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .card {

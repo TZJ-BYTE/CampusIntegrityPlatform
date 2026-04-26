@@ -1,0 +1,61 @@
+{
+  "nextSeq": 5,
+  "events": [
+    {
+      "seq": 1,
+      "eventId": "aaf09e26-00f2-4bd8-bb3e-5a1c6f7a2240",
+      "deviceId": "744a9edb-d8e6-4ff2-b0df-bea809a7e58f",
+      "eventType": "quiz_session_started",
+      "entityType": "quiz_session",
+      "entityId": "fbf95ca4-1b29-4dec-945f-485d96588cc1",
+      "payload": {
+        "mode": "stage",
+        "sessionId": "fbf95ca4-1b29-4dec-945f-485d96588cc1",
+        "startedAt": 1777028387191
+      },
+      "occurredAt": 1777028387191
+    },
+    {
+      "seq": 2,
+      "eventId": "5ef20fab-981b-4896-a8ed-4befb91bf68d",
+      "deviceId": "744a9edb-d8e6-4ff2-b0df-bea809a7e58f",
+      "eventType": "quiz_session_started",
+      "entityType": "quiz_session",
+      "entityId": "c11be14d-279b-493f-bc30-e97e4b86894b",
+      "payload": {
+        "mode": "practice",
+        "sessionId": "c11be14d-279b-493f-bc30-e97e4b86894b",
+        "startedAt": 1777028387590
+      },
+      "occurredAt": 1777028387590
+    },
+    {
+      "seq": 3,
+      "eventId": "cccb4a1a-e305-4507-8bd4-e9b06609978d",
+      "deviceId": "744a9edb-d8e6-4ff2-b0df-bea809a7e58f",
+      "eventType": "quiz_session_started",
+      "entityType": "quiz_session",
+      "entityId": "5da94d11-e538-43e5-bc4c-d6c4d91bb2b4",
+      "payload": {
+        "mode": "stage",
+        "sessionId": "5da94d11-e538-43e5-bc4c-d6c4d91bb2b4",
+        "startedAt": 1777028388069
+      },
+      "occurredAt": 1777028388069
+    },
+    {
+      "seq": 4,
+      "eventId": "bfaa127d-be00-43a8-ae91-2b8f4c7d8cc2",
+      "deviceId": "744a9edb-d8e6-4ff2-b0df-bea809a7e58f",
+      "eventType": "quiz_session_started",
+      "entityType": "quiz_session",
+      "entityId": "3a827891-590d-4415-80ed-36418ba63e55",
+      "payload": {
+        "mode": "daily",
+        "sessionId": "3a827891-590d-4415-80ed-36418ba63e55",
+        "startedAt": 1777028388488
+      },
+      "occurredAt": 1777028388488
+    }
+  ]
+}

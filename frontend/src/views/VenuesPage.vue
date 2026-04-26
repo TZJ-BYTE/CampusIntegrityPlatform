@@ -1,49 +1,65 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import FeedCard from '../components/FeedCard.vue'
+import FeedLayout from '../components/FeedLayout.vue'
+import coverUrl from '../assets/placeholder-cover.svg'
 import {
-  contentGetVenue,
   contentListVenues,
-  userSetFavorite,
   type ApiResponse,
-  type VenueDetail,
   type VenueListItem,
 } from '../api/tauri'
 
 const route = useRoute()
+const router = useRouter()
 const keyword = ref('')
 const typeFilter = ref('')
 const loading = ref(false)
 const result = ref<ApiResponse<{ items: VenueListItem[]; total: number }> | null>(null)
-const selected = ref<ApiResponse<VenueDetail> | null>(null)
+const items = ref<VenueListItem[]>([])
+const total = ref(0)
+const pageSize = 50
+let debounceTimer: number | null = null
 
-async function refresh() {
+async function refresh(reset = true) {
+  if (reset) {
+    items.value = []
+    total.value = 0
+  }
   loading.value = true
   try {
-    result.value = await contentListVenues({
+    const r = await contentListVenues({
       keyword: keyword.value.trim() || undefined,
       type: typeFilter.value.trim() || undefined,
-      limit: 50,
-      offset: 0,
+      limit: pageSize,
+      offset: reset ? 0 : items.value.length,
     })
+    result.value = r
+    if (r.ok) {
+      total.value = r.data.total
+      items.value = reset ? r.data.items : [...items.value, ...r.data.items]
+    }
   } finally {
     loading.value = false
   }
 }
 
-async function openDetail(id: string) {
-  selected.value = await contentGetVenue({ id })
+const hasMore = computed(() => items.value.length < total.value)
+
+async function loadMore() {
+  if (loading.value) return
+  if (!hasMore.value) return
+  await refresh(false)
 }
 
-async function favoriteCurrent() {
-  if (!selected.value?.ok) return
-  await userSetFavorite({ entityType: 'venue', entityId: selected.value.data.id, isFavorite: true })
+function openDetail(id: string) {
+  router.push({ name: 'venueDetail', params: { id } })
 }
 
 async function maybeOpenFromQuery() {
   const id = route.query.open
   if (typeof id === 'string' && id.trim()) {
-    await openDetail(id)
+    await router.replace({ name: 'venueDetail', params: { id: id.trim() } })
   }
 }
 
@@ -58,81 +74,85 @@ watch(
     await maybeOpenFromQuery()
   },
 )
+
+watch([keyword, typeFilter], async () => {
+  if (debounceTimer != null) window.clearTimeout(debounceTimer)
+  debounceTimer = window.setTimeout(() => refresh(true), 450)
+})
 </script>
 
 <template>
-  <div>
-    <div class="toolbar tute-card">
-      <div class="left">
-        <input v-model="keyword" class="tute-input" placeholder="搜索名称（示例：廉洁）" @keyup.enter="refresh" />
-        <input v-model="typeFilter" class="tute-input" placeholder="类型（示例：文化展示）" @keyup.enter="refresh" />
-        <button class="tute-btn" type="button" :disabled="loading" @click="refresh">
-          {{ loading ? '加载中…' : '搜索' }}
-        </button>
-      </div>
-      <div class="right">
-        <span v-if="result?.ok" class="tute-muted">共 {{ result.data.total }} 条</span>
-        <span v-else-if="result && !result.ok" class="err">{{ result.error.code }} · {{ result.error.message }}</span>
-      </div>
-    </div>
-
-    <div v-if="result?.ok" class="tute-grid grid">
-      <button v-for="v in result.data.items" :key="v.id" class="tute-grid-card item" type="button" @click="openDetail(v.id)">
-        <div class="icon"></div>
-        <div class="name">{{ v.name }}</div>
-        <div class="meta">
-          <span class="tute-badge gold">{{ v.type }}</span>
-          <span class="tute-badge">{{ v.id }}</span>
-        </div>
-      </button>
-      <div v-if="result.data.items.length === 0" class="empty tute-card">暂无数据</div>
-    </div>
-
-    <div v-if="selected" class="modalBackdrop" @click.self="selected = null">
-      <div class="modal">
-        <div v-if="selected.ok" class="modalBody">
-          <div class="modalHeader">
-            <div class="modalTitle">{{ selected.data.name }}</div>
-            <div class="modalTags">
-              <span class="tute-badge gold">{{ selected.data.type }}</span>
-              <span class="tute-badge">{{ selected.data.id }}</span>
-            </div>
+  <div class="page">
+    <FeedLayout>
+      <template #main>
+        <div class="toolbar tute-card">
+          <div class="left">
+            <input v-model="keyword" class="tute-input" placeholder="搜索名称（示例：廉洁）" @keyup.enter="() => refresh(true)" />
+            <input v-model="typeFilter" class="tute-input" placeholder="类型（示例：文化展示）" @keyup.enter="() => refresh(true)" />
+            <button class="tute-btn" type="button" :disabled="loading" @click="() => refresh(true)">
+              {{ loading ? '加载中…' : '搜索' }}
+            </button>
           </div>
-
-          <div v-if="selected.data.location" class="section">
-            <div class="k">地点</div>
-            <div class="v">{{ selected.data.location }}</div>
-          </div>
-          <div v-if="selected.data.openHours" class="section">
-            <div class="k">开放时间</div>
-            <div class="v">{{ selected.data.openHours }}</div>
-          </div>
-          <div v-if="selected.data.contact" class="section">
-            <div class="k">联系方式</div>
-            <div class="v">{{ selected.data.contact }}</div>
-          </div>
-          <div v-if="selected.data.description" class="section">
-            <div class="k">简介</div>
-            <div class="v">{{ selected.data.description }}</div>
-          </div>
-
-          <div class="modalActions">
-            <button class="tute-btn" type="button" @click="favoriteCurrent">收藏</button>
-            <button class="tute-btn-ghost" type="button" @click="selected = null">关闭</button>
+          <div class="right">
+            <span v-if="result?.ok" class="tute-muted">已显示 {{ items.length }} / {{ total }} 条</span>
+            <span v-else-if="result && !result.ok" class="err">{{ result.error.code }} · {{ result.error.message }}</span>
           </div>
         </div>
-        <div v-else class="modalBody">
-          <div class="err">{{ selected.error.code }} · {{ selected.error.message }}</div>
-          <div class="modalActions">
-            <button class="tute-btn-ghost" type="button" @click="selected = null">关闭</button>
+
+        <transition-group name="feed" tag="div" class="feed">
+          <FeedCard
+            v-for="v in items"
+            :key="v.id"
+            :badge="v.type"
+            meta="场所"
+            :title="v.name"
+            :subtitle="v.type"
+            :thumb="coverUrl"
+            :clickable="true"
+            @click="openDetail(v.id)"
+          >
+            <div class="clamp2">打开后可查看简介、开放时间与联系方式</div>
+            <template #footer>
+              <div class="tags">
+                <span class="tute-badge">{{ v.id }}</span>
+              </div>
+              <div class="actions">
+                <button class="tute-btn-ghost" type="button" @click.stop="openDetail(v.id)">打开</button>
+              </div>
+            </template>
+          </FeedCard>
+        </transition-group>
+
+        <div v-if="result?.ok && items.length === 0" class="empty tute-card">暂无数据</div>
+
+        <div v-if="result?.ok && hasMore" class="more">
+          <button class="tute-btn-ghost" type="button" :disabled="loading" @click="loadMore">
+            {{ loading ? '加载中…' : '加载更多' }}
+          </button>
+        </div>
+      </template>
+
+      <template #aside>
+        <div class="side tute-card">
+          <div class="sideTitle">探索建议</div>
+          <div class="sideBody">优先收藏你计划参观或组织活动的点位，后续可作为线下任务清单。</div>
+        </div>
+        <div class="side tute-card">
+          <div class="sideTitle">筛选提示</div>
+          <div class="sideBody">
+            <div class="sideRow"><span>类型：</span><span class="tute-muted">文化展示 / 红色教育 / 实践体验</span></div>
           </div>
         </div>
-      </div>
-    </div>
+      </template>
+    </FeedLayout>
   </div>
 </template>
 
 <style scoped>
+.page {
+  padding: 0 0 8px;
+}
+
 .toolbar {
   padding: 12px 12px;
   display: flex;
@@ -149,105 +169,70 @@ watch(
 }
 
 .right {
-  font-size: 12px;
-  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .err {
   color: #d93026;
 }
 
-.grid {
-  margin-top: 16px;
+.feed {
+  margin-top: 14px;
+  display: grid;
+  gap: 12px;
 }
 
-.item {
-  text-align: left;
-  border: 0;
-}
-
-.icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: rgba(139, 26, 92, 0.12);
-  border: 1px solid rgba(139, 26, 92, 0.2);
-}
-
-.name {
-  margin-top: 10px;
-  font-size: 14px;
-  font-weight: 800;
-}
-
-.meta {
-  margin-top: 10px;
+.tags {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
 
 .empty {
-  grid-column: 1 / -1;
+  margin-top: 12px;
   padding: 14px 14px;
   color: var(--text-muted);
-  box-shadow: var(--shadow-card);
-  border-radius: 4px;
 }
 
-.modalBackdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: grid;
-  place-items: center;
-  padding: 16px;
-}
-
-.modal {
-  width: min(860px, 96vw);
-  max-height: 88vh;
-  overflow: auto;
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.16);
-  border-radius: 6px;
-  box-shadow: var(--shadow-card-hover);
-}
-
-.modalBody {
-  padding: 14px 14px;
-}
-
-.modalHeader {
+.more {
+  margin-top: 12px;
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
+  justify-content: center;
 }
 
-.modalTitle {
-  font-weight: 900;
-  font-size: 14px;
+.actions {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
 }
 
-.modalTags {
+.clamp2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.detailMeta {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  align-items: center;
 }
 
-.section {
+.block {
   margin-top: 12px;
   padding: 12px 12px;
-  border-radius: 4px;
-  background: #fafafa;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.03);
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .k {
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 900;
 }
 
 .v {
@@ -258,10 +243,49 @@ watch(
   white-space: pre-wrap;
 }
 
-.modalActions {
-  margin-top: 12px;
+.detailActions {
+  margin-top: 14px;
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.side {
+  padding: 12px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.sideTitle {
+  font-weight: 900;
+  font-size: 13px;
+}
+
+.sideBody {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.sideRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.feed-enter-active {
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+.feed-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+@media (max-width: 980px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 </style>

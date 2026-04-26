@@ -2,7 +2,7 @@ use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-pub const USER_SCHEMA_VERSION: i64 = 2;
+pub const USER_SCHEMA_VERSION: i64 = 4;
 pub const CONTENT_SCHEMA_VERSION: i64 = 1;
 
 pub fn open_user_db(path: &Path) -> rusqlite::Result<Connection> {
@@ -84,6 +84,39 @@ fn migrate_user_db(conn: &Connection) -> rusqlite::Result<()> {
       value TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS profile (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sync_outbox (
+      event_id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      occurred_at INTEGER NOT NULL,
+      sent_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_outbox_unsent
+      ON sync_outbox(sent_at, occurred_at);
+
+    CREATE TABLE IF NOT EXISTS device (
+      device_id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      last_sync_at INTEGER,
+      sync_cursor TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sync_applied (
+      event_id TEXT PRIMARY KEY,
+      applied_at INTEGER NOT NULL
+    );
   "#,
   )?;
 
@@ -95,11 +128,20 @@ fn migrate_user_db(conn: &Connection) -> rusqlite::Result<()> {
     )
     .optional()?;
 
-  if current.is_none() {
-    conn.execute(
-      "INSERT INTO schema_meta(key, value) VALUES('user_schema_version', ?1)",
-      params![USER_SCHEMA_VERSION.to_string()],
-    )?;
+  match current {
+    None => {
+      conn.execute(
+        "INSERT INTO schema_meta(key, value) VALUES('user_schema_version', ?1)",
+        params![USER_SCHEMA_VERSION.to_string()],
+      )?;
+    }
+    Some(v) if v < USER_SCHEMA_VERSION => {
+      conn.execute(
+        "UPDATE schema_meta SET value = ?1 WHERE key = 'user_schema_version'",
+        params![USER_SCHEMA_VERSION.to_string()],
+      )?;
+    }
+    _ => {}
   }
 
   Ok(())

@@ -7,7 +7,11 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "content-server": "node tools/content-update-server.mjs"
+    "server": "powershell -NoProfile -Command \"cd server-go; go run ./cmd/server\"",
+    "sync-server": "powershell -NoProfile -Command \"cd server-go; go run ./cmd/syncserver\"",
+    "content-server": "powershell -NoProfile -Command \"cd server-go; go run ./cmd/contentserver\"",
+    "content-server:node": "node server/content-update-server.mjs",
+    "sync-server:node": "node server/sync-server.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

@@ -1,22 +1,33 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import FeedCard from '../components/FeedCard.vue'
+import FeedLayout from '../components/FeedLayout.vue'
 import {
-  contentGetStory,
   contentGetTodayStory,
   contentListStories,
+  userIsFavorite,
   userSetFavorite,
   type ApiResponse,
   type StoryDetail,
   type StoryListItem,
 } from '../api/tauri'
+import { useToastStore } from '../stores/toast'
+import { animatePop } from '../utils/motion'
 
 const route = useRoute()
+const router = useRouter()
+const toast = useToastStore()
 const keyword = ref('')
 const loading = ref(false)
 const today = ref<ApiResponse<StoryDetail> | null>(null)
 const list = ref<ApiResponse<{ items: StoryListItem[]; total: number }> | null>(null)
-const selected = ref<ApiResponse<StoryDetail> | null>(null)
+const items = ref<StoryListItem[]>([])
+const total = ref(0)
+const pageSize = 50
+const todayIsFavorite = ref(false)
+const todayFavBtnEl = ref<HTMLElement | null>(null)
+let debounceTimer: number | null = null
 
 function todayYyyyMMdd() {
   const d = new Date()
@@ -26,32 +37,63 @@ function todayYyyyMMdd() {
   return `${y}${m}${day}`
 }
 
-async function refresh() {
+async function refresh(reset = true) {
+  if (reset) {
+    items.value = []
+    total.value = 0
+  }
   loading.value = true
   try {
     today.value = await contentGetTodayStory({ yyyyMMdd: todayYyyyMMdd() })
-    list.value = await contentListStories({
+    todayIsFavorite.value = false
+    if (today.value.ok) {
+      const f = await userIsFavorite({ entityType: 'story', entityId: today.value.data.id })
+      if (f.ok) todayIsFavorite.value = f.data.isFavorite
+    }
+    const r = await contentListStories({
       keyword: keyword.value.trim() || undefined,
-      limit: 50,
-      offset: 0,
+      limit: pageSize,
+      offset: reset ? 0 : items.value.length,
     })
+    list.value = r
+    if (r.ok) {
+      total.value = r.data.total
+      items.value = reset ? r.data.items : [...items.value, ...r.data.items]
+    }
   } finally {
     loading.value = false
   }
 }
 
-async function openDetail(id: string) {
-  selected.value = await contentGetStory({ id })
+const hasMore = computed(() => items.value.length < total.value)
+
+async function loadMore() {
+  if (loading.value) return
+  if (!hasMore.value) return
+  await refresh(false)
 }
 
-async function favoriteStory(id: string) {
-  await userSetFavorite({ entityType: 'story', entityId: id, isFavorite: true })
+function openDetail(id: string) {
+  router.push({ name: 'storyDetail', params: { id } })
+}
+
+async function toggleFavoriteStory(id: string) {
+  const current = todayIsFavorite.value
+  const next = !current
+  const r = await userSetFavorite({ entityType: 'story', entityId: id, isFavorite: next })
+  if (r.ok) {
+    todayIsFavorite.value = r.data.isFavorite
+    if (todayFavBtnEl.value) animatePop(todayFavBtnEl.value)
+    toast.success(r.data.isFavorite ? '已收藏' : '已取消收藏')
+  } else {
+    toast.error(`${r.error.code} · ${r.error.message}`)
+  }
 }
 
 async function maybeOpenFromQuery() {
   const id = route.query.open
   if (typeof id === 'string' && id.trim()) {
-    await openDetail(id)
+    await router.replace({ name: 'storyDetail', params: { id: id.trim() } })
   }
 }
 
@@ -66,76 +108,108 @@ watch(
     await maybeOpenFromQuery()
   },
 )
+
+watch(keyword, async () => {
+  if (debounceTimer != null) window.clearTimeout(debounceTimer)
+  debounceTimer = window.setTimeout(() => refresh(true), 450)
+})
 </script>
 
 <template>
-  <div>
-    <div class="toolbar tute-card">
-      <div class="left">
-        <input v-model="keyword" class="tute-input" placeholder="搜索标题" @keyup.enter="refresh" />
-        <button class="tute-btn" type="button" :disabled="loading" @click="refresh">
-          {{ loading ? '加载中…' : '搜索' }}
-        </button>
-      </div>
-      <div class="right">
-        <span v-if="list?.ok" class="tute-muted">历史故事：{{ list.data.total }} 条</span>
-      </div>
-    </div>
-
-    <div v-if="today?.ok" class="today">
-      <div class="todayTitle">今日推荐 · {{ today.data.title }}</div>
-      <div class="todayBody">{{ today.data.body }}</div>
-      <div class="todayActions">
-        <button class="tute-btn" type="button" @click="favoriteStory(today.data.id)">收藏</button>
-        <button class="tute-btn-ghost" type="button" @click="openDetail(today.data.id)">查看详情</button>
-      </div>
-    </div>
-    <div v-else-if="today && !today.ok" class="err">{{ today.error.code }} · {{ today.error.message }}</div>
-
-    <div v-else-if="list && !list.ok" class="err">{{ list.error.code }} · {{ list.error.message }}</div>
-
-    <div v-if="list?.ok" class="tute-grid grid">
-      <button v-for="s in list.data.items" :key="s.id" class="tute-grid-card item" type="button" @click="openDetail(s.id)">
-        <div class="title">{{ s.title }}</div>
-        <div class="sub">{{ s.source ?? '—' }}<span v-if="s.dayOfYear"> · 第 {{ s.dayOfYear }} 天</span></div>
-        <div class="tags">
-          <span class="tute-badge">{{ s.id }}</span>
-        </div>
-      </button>
-      <div v-if="list.data.items.length === 0" class="empty tute-card">暂无数据</div>
-    </div>
-
-    <div v-if="selected" class="modalBackdrop" @click.self="selected = null">
-      <div class="modal">
-        <div v-if="selected.ok" class="modalBody">
-          <div class="modalHeader">
-            <div class="modalTitle">{{ selected.data.title }}</div>
-            <div class="modalTags">
-              <span class="tute-badge gold">{{ selected.data.source ?? '—' }}</span>
-              <span class="tute-badge">{{ selected.data.id }}</span>
-            </div>
+  <div class="page">
+    <FeedLayout>
+      <template #main>
+        <div class="toolbar tute-card">
+          <div class="left">
+            <input v-model="keyword" class="tute-input" placeholder="搜索标题" @keyup.enter="() => refresh(true)" />
+            <button class="tute-btn" type="button" :disabled="loading" @click="() => refresh(true)">
+              {{ loading ? '加载中…' : '搜索' }}
+            </button>
           </div>
-          <div class="section">
-            <div class="k">正文</div>
-            <div class="v">{{ selected.data.body }}</div>
-          </div>
-          <div class="modalActions">
-            <button class="tute-btn" type="button" @click="favoriteStory(selected.data.id)">收藏</button>
-            <button class="tute-btn-ghost" type="button" @click="selected = null">关闭</button>
+          <div class="right">
+            <span v-if="list?.ok" class="tute-muted">已显示 {{ items.length }} / {{ total }} 条</span>
+            <span v-else-if="list && !list.ok" class="err">{{ list.error.code }} · {{ list.error.message }}</span>
           </div>
         </div>
-        <div v-else class="modalBody">
-          <div class="err">{{ selected.error.code }} · {{ selected.error.message }}</div>
-          <div class="modalActions">
-            <button class="tute-btn-ghost" type="button" @click="selected = null">关闭</button>
+
+        <transition-group name="feed" tag="div" class="feed">
+          <FeedCard
+            v-if="today?.ok"
+            key="today"
+            badge="今日推荐"
+            :meta="today.data.source ?? '—'"
+            :title="today.data.title"
+            :subtitle="today.data.dayOfYear ? `第 ${today.data.dayOfYear} 天` : ''"
+          >
+            <div class="clamp3">{{ today.data.body }}</div>
+            <template #footer>
+              <div class="tags">
+                <span class="tute-badge gold">{{ todayIsFavorite ? '已收藏' : '未收藏' }}</span>
+              </div>
+              <div class="actions">
+                <button class="tute-btn-ghost" type="button" @click.stop="openDetail(today.data.id)">打开</button>
+                <button ref="todayFavBtnEl" class="tute-btn" type="button" @click.stop="toggleFavoriteStory(today.data.id)">
+                  {{ todayIsFavorite ? '取消收藏' : '收藏' }}
+                </button>
+              </div>
+            </template>
+          </FeedCard>
+
+          <FeedCard
+            v-for="s in items"
+            :key="s.id"
+            badge="故事"
+            :meta="s.source ?? '—'"
+            :title="s.title"
+            :subtitle="s.dayOfYear ? `第 ${s.dayOfYear} 天` : ''"
+            :clickable="true"
+            @click="openDetail(s.id)"
+          >
+            <div class="clamp2">打开后可收藏，并支持复制正文</div>
+            <template #footer>
+              <div class="tags">
+                <span class="tute-badge">{{ s.id }}</span>
+              </div>
+              <div class="actions">
+                <button class="tute-btn-ghost" type="button" @click.stop="openDetail(s.id)">打开</button>
+              </div>
+            </template>
+          </FeedCard>
+        </transition-group>
+
+        <div v-if="list?.ok && items.length === 0" class="empty tute-card">暂无数据</div>
+
+        <div v-if="list?.ok && hasMore" class="more">
+          <button class="tute-btn-ghost" type="button" :disabled="loading" @click="loadMore">
+            {{ loading ? '加载中…' : '加载更多' }}
+          </button>
+        </div>
+      </template>
+
+      <template #aside>
+        <div class="side tute-card">
+          <div class="sideTitle">学习小贴士</div>
+          <div class="sideBody">
+            每天读一则故事并做 3 题练习，收藏你觉得“可执行”的做法，长期会更有收益。
           </div>
         </div>
-      </div>
-    </div>
+        <div class="side tute-card">
+          <div class="sideTitle">提示</div>
+          <div class="sideBody">
+            <div class="sideRow"><span>建议：</span><span class="tute-muted">收藏用于建立“可复用清单”</span></div>
+            <div class="sideRow"><span>动作：</span><span class="tute-muted">阅读抽屉支持复制正文</span></div>
+          </div>
+        </div>
+      </template>
+    </FeedLayout>
   </div>
 </template>
 
 <style scoped>
+.page {
+  padding: 0 0 8px;
+}
+
 .toolbar {
   padding: 12px 12px;
   display: flex;
@@ -152,146 +226,112 @@ watch(
 }
 
 .right {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.err {
-  margin-top: 12px;
-  font-size: 12px;
-  color: #d93026;
-}
-
-.today {
-  margin-top: 16px;
-  padding: 14px 14px;
-  border-radius: 4px;
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: var(--shadow-card);
-}
-
-.todayTitle {
-  font-weight: 900;
-  font-size: 13px;
-}
-
-.todayBody {
-  margin-top: 10px;
-  font-size: 13px;
-  color: var(--text-primary);
-  line-height: 1.8;
-  white-space: pre-wrap;
-}
-
-.todayActions {
-  margin-top: 12px;
   display: flex;
+  align-items: center;
   gap: 10px;
-  justify-content: flex-end;
 }
 
-.grid {
-  margin-top: 16px;
-}
-
-.item {
-  text-align: left;
-  border: 0;
-}
-
-.title {
-  font-weight: 800;
-  font-size: 13px;
-}
-
-.sub {
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--text-muted);
+.feed {
+  margin-top: 14px;
+  display: grid;
+  gap: 12px;
 }
 
 .tags {
-  margin-top: 10px;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
 
 .empty {
-  padding: 14px;
-  color: var(--text-muted);
-  grid-column: 1 / -1;
-}
-
-.modalBackdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: grid;
-  place-items: center;
-  padding: 16px;
-}
-
-.modal {
-  width: min(880px, 96vw);
-  max-height: 88vh;
-  overflow: auto;
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.16);
-  border-radius: 6px;
-  box-shadow: var(--shadow-card-hover);
-}
-
-.modalBody {
+  margin-top: 12px;
   padding: 14px 14px;
+  color: var(--text-muted);
 }
 
-.modalHeader {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.modalTitle {
-  font-weight: 900;
-  font-size: 14px;
-}
-
-.modalTags {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.section {
+.more {
   margin-top: 12px;
-  padding: 12px 12px;
-  border-radius: 4px;
-  background: #fafafa;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  display: flex;
+  justify-content: center;
 }
 
-.k {
-  font-weight: 800;
+.err {
   font-size: 12px;
+  color: #d93026;
 }
 
-.v {
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--text-primary);
-  line-height: 1.7;
-  white-space: pre-wrap;
+.actions {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
 }
 
-.modalActions {
+.clamp2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.clamp3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.detailMeta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.detailBody {
   margin-top: 12px;
+  white-space: pre-wrap;
+  line-height: 1.8;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.detailActions {
+  margin-top: 14px;
   display: flex;
   gap: 10px;
   justify-content: flex-end;
+}
+
+.side {
+  padding: 12px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.sideTitle {
+  font-weight: 900;
+  font-size: 13px;
+}
+
+.sideBody {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.sideRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.feed-enter-active {
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+.feed-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 @media (max-width: 980px) {

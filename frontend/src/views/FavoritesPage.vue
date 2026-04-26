@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import ConfirmModal from '../components/ConfirmModal.vue'
 import {
   contentResolveEntities,
   userListFavorites,
@@ -9,17 +10,19 @@ import {
   type FavoriteItem,
   type ResolvedEntity,
 } from '../api/tauri'
+import { useToastStore } from '../stores/toast'
 
 const router = useRouter()
+const toast = useToastStore()
 
 const loading = ref(false)
 const list = ref<ApiResponse<{ items: FavoriteItem[]; total: number }> | null>(null)
 const resolved = ref<ApiResponse<{ items: ResolvedEntity[] }> | null>(null)
-const message = ref('')
-
-function setMessage(s: string) {
-  message.value = s
-}
+const offset = ref(0)
+const pageSize = 60
+const items = ref<FavoriteItem[]>([])
+const total = ref(0)
+const pendingRemove = ref<FavoriteItem | null>(null)
 
 function keyOf(i: { entityType: string; entityId: string }) {
   return `${i.entityType}:${i.entityId}`
@@ -39,21 +42,26 @@ function formatTime(ms: number) {
   return new Date(ms).toLocaleString()
 }
 
-function targetPath(entityType: string) {
-  if (entityType === 'case') return '/cases'
-  if (entityType === 'regulation') return '/regulations'
-  if (entityType === 'story') return '/stories'
-  if (entityType === 'venue') return '/venues'
+function targetRoute(entityType: string, entityId: string) {
+  if (entityType === 'case') return { name: 'caseDetail', params: { id: entityId } }
+  if (entityType === 'regulation') return { name: 'regulationDetail', params: { id: entityId } }
+  if (entityType === 'story') return { name: 'storyDetail', params: { id: entityId } }
+  if (entityType === 'venue') return { name: 'venueDetail', params: { id: entityId } }
   return null
 }
 
 async function refresh() {
   loading.value = true
   try {
-    list.value = await userListFavorites({ limit: 200, offset: 0 })
-    if (list.value.ok) {
+    offset.value = 0
+    items.value = []
+    const r = await userListFavorites({ limit: pageSize, offset: 0 })
+    list.value = r
+    if (r.ok) {
+      items.value = r.data.items
+      total.value = r.data.total
       resolved.value = await contentResolveEntities({
-        items: list.value.data.items.map((i) => ({ entityType: i.entityType, entityId: i.entityId })),
+        items: r.data.items.map((i) => ({ entityType: i.entityType, entityId: i.entityId })),
       })
     } else {
       resolved.value = null
@@ -63,24 +71,54 @@ async function refresh() {
   }
 }
 
+const hasMore = computed(() => items.value.length < total.value)
+
+async function loadMore() {
+  if (loading.value) return
+  if (!hasMore.value) return
+  loading.value = true
+  try {
+    const nextOffset = items.value.length
+    const r = await userListFavorites({ limit: pageSize, offset: nextOffset })
+    list.value = r
+    if (!r.ok) {
+      toast.error(`${r.error.code} · ${r.error.message}`)
+      return
+    }
+    offset.value = nextOffset
+    items.value = [...items.value, ...r.data.items]
+    total.value = r.data.total
+    resolved.value = await contentResolveEntities({
+      items: items.value.map((i) => ({ entityType: i.entityType, entityId: i.entityId })),
+    })
+  } finally {
+    loading.value = false
+  }
+}
+
 async function open(i: FavoriteItem) {
-  const p = targetPath(i.entityType)
-  if (!p) {
-    setMessage(`暂不支持打开：${i.entityType}`)
+  const r = targetRoute(i.entityType, i.entityId)
+  if (!r) {
+    toast.info(`暂不支持打开：${i.entityType}`)
     return
   }
-  await router.push({ path: p, query: { open: i.entityId } })
+  await router.push(r)
 }
 
 async function remove(i: FavoriteItem) {
-  const ok = window.confirm('确认取消收藏？')
-  if (!ok) return
+  pendingRemove.value = i
+}
+
+async function confirmRemove() {
+  const i = pendingRemove.value
+  pendingRemove.value = null
+  if (!i) return
   const r = await userSetFavorite({ entityType: i.entityType, entityId: i.entityId, isFavorite: false })
   if (r.ok) {
-    setMessage('已取消收藏')
+    toast.success('已取消收藏')
     await refresh()
   } else {
-    setMessage(`${r.error.code} · ${r.error.message}`)
+    toast.error(`${r.error.code} · ${r.error.message}`)
   }
 }
 
@@ -96,18 +134,16 @@ onMounted(refresh)
         </button>
       </div>
       <div class="right">
-        <span v-if="list?.ok" class="tute-muted">共 {{ list.data.total }} 条</span>
+        <span v-if="list?.ok" class="tute-muted">共 {{ total }} 条</span>
         <span v-else-if="list && !list.ok" class="err">{{ list.error.code }} · {{ list.error.message }}</span>
       </div>
     </div>
 
-    <div v-if="message" class="message">{{ message }}</div>
-
     <div v-if="list?.ok" class="list">
-      <div v-if="list.data.items.length === 0" class="empty tute-card">暂无收藏</div>
+      <div v-if="items.length === 0" class="empty tute-card">暂无收藏</div>
 
       <div v-else class="items">
-        <div v-for="i in list.data.items" :key="keyOf(i)" class="item">
+        <div v-for="i in items" :key="keyOf(i)" class="item">
           <div class="main">
             <div class="title">
               {{
@@ -128,10 +164,25 @@ onMounted(refresh)
           </div>
         </div>
       </div>
+      <div v-if="hasMore" class="more">
+        <button class="tute-btn-ghost" type="button" :disabled="loading" @click="loadMore">
+          {{ loading ? '加载中…' : '加载更多' }}
+        </button>
+      </div>
     </div>
 
     <div v-else-if="list && !list.ok" class="err">{{ list.error.code }} · {{ list.error.message }}</div>
     <div v-else class="tute-muted">加载中…</div>
+
+    <ConfirmModal
+      :open="!!pendingRemove"
+      title="取消收藏"
+      message="确认取消收藏？"
+      confirm-text="取消收藏"
+      :danger="true"
+      @cancel="pendingRemove = null"
+      @confirm="confirmRemove"
+    />
   </div>
 </template>
 
@@ -160,16 +211,6 @@ onMounted(refresh)
   margin-top: 12px;
   font-size: 12px;
   color: #d93026;
-}
-
-.message {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 6px;
-  background: rgba(139, 26, 92, 0.06);
-  border: 1px solid rgba(139, 26, 92, 0.18);
-  color: var(--text-secondary);
-  font-size: 12px;
 }
 
 .list {
@@ -233,5 +274,11 @@ onMounted(refresh)
   color: var(--text-muted);
   box-shadow: var(--shadow-card);
   border-radius: 4px;
+}
+
+.more {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
 }
 </style>

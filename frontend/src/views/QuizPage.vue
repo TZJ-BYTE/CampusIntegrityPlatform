@@ -10,29 +10,53 @@ import {
   type QuizStartSessionResult,
   type QuizSubmitAnswerResult,
 } from '../api/tauri'
+import { useToastStore } from '../stores/toast'
 
+const toast = useToastStore()
 const progress = ref<ApiResponse<QuizProgress> | null>(null)
 const session = ref<ApiResponse<QuizStartSessionResult> | null>(null)
 const index = ref(0)
 const last = ref<ApiResponse<QuizSubmitAnswerResult> | null>(null)
 const loading = ref(false)
+const mode = ref<'daily' | 'stage' | 'practice'>('daily')
+const finished = ref(false)
+const answeredCount = ref(0)
+const correctCount = ref(0)
+const pointsStart = ref(0)
+const pointsEnd = ref(0)
 
 const current = computed<QuizQuestion | null>(() => {
   if (!session.value?.ok) return null
   return session.value.data.questions[index.value] ?? null
 })
 
+const totalCount = computed(() => (session.value?.ok ? session.value.data.questions.length : 0))
+const progressPct = computed(() => {
+  if (!totalCount.value) return 0
+  return Math.round((Math.min(index.value, totalCount.value) / totalCount.value) * 100)
+})
+
 async function refreshProgress() {
   progress.value = await quizGetProgress()
 }
 
-async function startDaily() {
+async function start(modeArg: 'daily' | 'stage' | 'practice') {
   loading.value = true
   try {
-    session.value = await quizStartSession({ mode: 'daily' })
+    await refreshProgress()
+    pointsStart.value = progress.value?.ok ? progress.value.data.totalPoints : 0
+    mode.value = modeArg
+    session.value = await quizStartSession({ mode: modeArg })
     index.value = 0
     last.value = null
+    finished.value = false
+    answeredCount.value = 0
+    correctCount.value = 0
     await refreshProgress()
+    pointsEnd.value = progress.value?.ok ? progress.value.data.totalPoints : 0
+    if (session.value.ok && session.value.data.questions.length === 0) {
+      toast.info('暂无题目（请先确保 content.db 中有 questions）')
+    }
   } finally {
     loading.value = false
   }
@@ -48,11 +72,32 @@ async function answer(optKey: string) {
     answer: optKey,
   })
   await refreshProgress()
+  if (last.value.ok) {
+    answeredCount.value += 1
+    if (last.value.data.isCorrect) correctCount.value += 1
+    pointsEnd.value = last.value.data.totalPoints
+  } else {
+    toast.error(`${last.value.error.code} · ${last.value.error.message}`)
+  }
 }
 
 function next() {
   last.value = null
   index.value += 1
+}
+
+function finishSession() {
+  finished.value = true
+  last.value = null
+}
+
+function resetSession() {
+  session.value = null
+  last.value = null
+  finished.value = false
+  index.value = 0
+  answeredCount.value = 0
+  correctCount.value = 0
 }
 
 onMounted(refreshProgress)
@@ -62,10 +107,11 @@ onMounted(refreshProgress)
   <div>
     <div class="toolbar tute-card">
       <div class="actions">
-        <button class="tute-btn" type="button" :disabled="loading" @click="startDaily">
-          {{ loading ? '启动中…' : '开始每日挑战' }}
+        <button class="tute-btn" type="button" :disabled="loading" @click="() => start('daily')">
+          {{ loading ? '启动中…' : '每日挑战' }}
         </button>
-        <button class="tute-btn-ghost" type="button" @click="refreshProgress">刷新积分</button>
+        <button class="tute-btn-ghost" type="button" :disabled="loading" @click="() => start('stage')">闯关练习</button>
+        <button class="tute-btn-ghost" type="button" :disabled="loading" @click="() => start('practice')">专项练习</button>
       </div>
       <div class="right">
         <span v-if="progress?.ok" class="tute-muted">当前积分：{{ progress.data.totalPoints }}</span>
@@ -75,15 +121,44 @@ onMounted(refreshProgress)
 
     <div v-if="session?.ok" class="panel tute-card">
       <div class="panelTop">
-        <div class="k">会话</div>
-        <div class="v mono">{{ session.data.sessionId }}</div>
+        <div class="k">模式</div>
+        <div class="v">{{ mode === 'daily' ? '每日挑战' : mode === 'stage' ? '闯关练习' : '专项练习' }}</div>
       </div>
       <div class="panelTop">
         <div class="k">进度</div>
-        <div class="v">{{ index + 1 }} / {{ session.data.questions.length }}</div>
+        <div class="v">{{ Math.min(index + 1, session.data.questions.length) }} / {{ session.data.questions.length }}</div>
+      </div>
+      <div class="bar">
+        <div class="barFill" :style="{ width: `${progressPct}%` }"></div>
       </div>
 
-      <div v-if="current" class="q">
+      <div v-if="finished" class="summary">
+        <div class="sumTitle">本次结果</div>
+        <div class="sumGrid">
+          <div class="sumItem">
+            <div class="sumK">答题数</div>
+            <div class="sumV">{{ answeredCount }} / {{ totalCount }}</div>
+          </div>
+          <div class="sumItem">
+            <div class="sumK">正确数</div>
+            <div class="sumV">{{ correctCount }}</div>
+          </div>
+          <div class="sumItem">
+            <div class="sumK">正确率</div>
+            <div class="sumV">{{ totalCount ? Math.round((correctCount / totalCount) * 100) : 0 }}%</div>
+          </div>
+          <div class="sumItem">
+            <div class="sumK">得分变化</div>
+            <div class="sumV">{{ pointsEnd - pointsStart }}</div>
+          </div>
+        </div>
+        <div class="resActions">
+          <button class="tute-btn" type="button" :disabled="loading" @click="() => start(mode)">再来一组</button>
+          <button class="tute-btn-ghost" type="button" @click="resetSession">退出</button>
+        </div>
+      </div>
+
+      <div v-else-if="current" class="q">
         <div class="stem">{{ current.stem }}</div>
         <div class="opts">
           <button
@@ -116,7 +191,7 @@ onMounted(refreshProgress)
               >
                 下一题
               </button>
-              <button v-else class="tute-btn-ghost" type="button" @click="session = null">完成</button>
+              <button v-else class="tute-btn" type="button" @click="finishSession">完成</button>
             </div>
           </div>
           <div v-else class="resultBody">
@@ -128,7 +203,7 @@ onMounted(refreshProgress)
     </div>
 
     <div v-else class="hint">
-      初版已实现最小闭环：开始会话 → 作答 → 积分累计（本地保存）。后续将补充题库分类、解析页、闯关与徽章。
+      选择一个模式开始答题。离线答题会写入本地；登录后会自动同步积分与答题记录。
     </div>
   </div>
 </template>
@@ -170,6 +245,20 @@ onMounted(refreshProgress)
   margin-bottom: 10px;
 }
 
+.bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  margin: 8px 0 4px;
+}
+
+.barFill {
+  height: 100%;
+  background: rgba(139, 26, 92, 0.8);
+  border-radius: 999px;
+}
+
 .k {
   font-size: 12px;
   font-weight: 800;
@@ -192,6 +281,45 @@ onMounted(refreshProgress)
   border-radius: 4px;
   background: #fafafa;
   border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.summary {
+  margin-top: 12px;
+  padding: 12px 12px;
+  border-radius: 8px;
+  background: #fafafa;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.sumTitle {
+  font-weight: 900;
+  font-size: 13px;
+}
+
+.sumGrid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sumItem {
+  padding: 10px 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.sumK {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sumV {
+  margin-top: 8px;
+  font-weight: 900;
+  font-size: 14px;
+  color: var(--text-primary);
 }
 
 .stem {

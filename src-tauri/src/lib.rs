@@ -1,11 +1,13 @@
+use std::sync::OnceLock;
+use std::time::Duration;
 use tauri::Manager;
 
-mod db;
+pub mod db;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .setup(|app| {
+    .setup(|app: &mut tauri::App| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
@@ -91,9 +93,18 @@ pub fn run() {
       quiz_submit_answer,
       quiz_get_progress,
       user_list_favorites,
+      user_is_favorite,
       user_set_favorite,
+      user_get_profile,
+      user_update_profile,
       user_get_settings,
       user_update_settings,
+      auth_get_state,
+      auth_set_server,
+      auth_login,
+      auth_logout,
+      sync_get_state,
+      sync_run,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
@@ -107,6 +118,20 @@ struct AppState {
   online_enabled: bool,
   user_db: std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>,
   content_db: std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>,
+}
+
+fn http_agent() -> &'static ureq::Agent {
+  static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+  AGENT.get_or_init(|| {
+    let config = ureq::Agent::config_builder()
+      .timeout_global(Some(Duration::from_secs(12)))
+      .timeout_connect(Some(Duration::from_secs(3)))
+      .timeout_send_request(Some(Duration::from_secs(3)))
+      .timeout_recv_response(Some(Duration::from_secs(6)))
+      .timeout_recv_body(Some(Duration::from_secs(12)))
+      .build();
+    ureq::Agent::new_with_config(config)
+  })
 }
 
 #[derive(serde::Serialize)]
@@ -715,7 +740,7 @@ fn content_check_update(
   drop(conn);
 
   let url = format!("{}/versions.json", base);
-  let text = match ureq::get(&url).call() {
+  let text = match http_agent().get(&url).call() {
     Ok(r) => match r.into_body().read_to_string() {
       Ok(s) => s,
       Err(e) => return invalid_argument(&format!("读取 versions.json 失败：{}", e)),
@@ -776,7 +801,7 @@ fn content_download_update(
   let pack_path = tmp_dir.join(format!("content-pack-{}.zip", unix_ms()));
   let pack_path_str = pack_path.to_string_lossy().to_string();
 
-  let resp = match ureq::get(&url).call() {
+  let resp = match http_agent().get(&url).call() {
     Ok(r) => r,
     Err(e) => return invalid_argument(&format!("下载失败：{}", e)),
   };
@@ -1723,25 +1748,47 @@ fn quiz_start_session(
   }
 
   drop(conn_content);
-  let conn_user = match lock_user_db::<QuizStartSessionResult>(&state) {
+  let mut conn_user = match lock_user_db::<QuizStartSessionResult>(&state) {
     Ok(c) => c,
     Err(e) => return e,
   };
 
   let session_id = uuid::Uuid::new_v4().to_string();
   let now = unix_ms();
-  let res = conn_user.execute(
-    "CREATE TABLE IF NOT EXISTS quiz_sessions (session_id TEXT PRIMARY KEY, mode TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER, summary_json TEXT)",
-    [],
+  let mode = args.mode;
+  let mode_for_db = mode.clone();
+  let session_id_for_db = session_id.clone();
+  let tx = match conn_user.transaction() {
+    Ok(t) => t,
+    Err(e) => return db_error(e),
+  };
+  let res = tx.execute(
+    "INSERT INTO quiz_sessions(session_id, mode, started_at) VALUES (?1, ?2, ?3)",
+    rusqlite::params![session_id_for_db, mode_for_db, now],
   );
   if let Err(e) = res {
+    let _ = tx.rollback();
     return db_error(e);
   }
-  let res = conn_user.execute(
-    "INSERT INTO quiz_sessions(session_id, mode, started_at) VALUES (?1, ?2, ?3)",
-    rusqlite::params![session_id, args.mode, now],
-  );
-  if let Err(e) = res {
+
+  let payload = serde_json::json!({
+    "sessionId": session_id.clone(),
+    "mode": mode,
+    "startedAt": now
+  });
+  if let Err(e) = enqueue_outbox(
+    &tx,
+    &state.device_id,
+    "quiz_session_started",
+    "quiz_session",
+    &session_id,
+    &payload,
+    now,
+  ) {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+  if let Err(e) = tx.commit() {
     return db_error(e);
   }
 
@@ -1771,6 +1818,9 @@ fn quiz_submit_answer(
   state: tauri::State<'_, AppState>,
   args: QuizSubmitAnswerArgs,
 ) -> ApiResponse<QuizSubmitAnswerResult> {
+  let session_id = args.session_id;
+  let question_id = args.question_id;
+  let answer = args.answer;
   let conn_content = match lock_content_db::<QuizSubmitAnswerResult>(&state) {
     Ok(c) => c,
     Err(e) => return e,
@@ -1778,7 +1828,7 @@ fn quiz_submit_answer(
 
   let q: rusqlite::Result<(String, Option<String>)> = conn_content.query_row(
     "SELECT answer_key, analysis FROM questions WHERE id = ?1",
-    rusqlite::params![args.question_id.clone()],
+    rusqlite::params![question_id.clone()],
     |row| Ok((row.get(0)?, row.get(1)?)),
   );
 
@@ -1798,43 +1848,89 @@ fn quiz_submit_answer(
     Err(e) => return db_error(e),
   };
 
-  let is_correct = args.answer.trim().eq_ignore_ascii_case(answer_key.trim());
+  let is_correct = answer.trim().eq_ignore_ascii_case(answer_key.trim());
   let points_delta: i64 = if is_correct { 10 } else { 0 };
   drop(conn_content);
 
-  let conn_user = match lock_user_db::<QuizSubmitAnswerResult>(&state) {
+  let mut conn_user = match lock_user_db::<QuizSubmitAnswerResult>(&state) {
     Ok(c) => c,
     Err(e) => return e,
   };
 
   let now = unix_ms();
-  let _ = conn_user.execute(
-    "CREATE TABLE IF NOT EXISTS quiz_answers (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, question_id TEXT NOT NULL, answer TEXT NOT NULL, is_correct INTEGER NOT NULL, answered_at INTEGER NOT NULL)",
-    [],
-  );
-  let _ = conn_user.execute(
-    "CREATE TABLE IF NOT EXISTS points_ledger (id TEXT PRIMARY KEY, reason TEXT NOT NULL, delta INTEGER NOT NULL, occurred_at INTEGER NOT NULL, ref_type TEXT, ref_id TEXT)",
-    [],
-  );
-
   let ans_id = uuid::Uuid::new_v4().to_string();
-  let res = conn_user.execute(
+  let ans_id_for_db = ans_id.clone();
+  let tx = match conn_user.transaction() {
+    Ok(t) => t,
+    Err(e) => return db_error(e),
+  };
+
+  let res = tx.execute(
     "INSERT INTO quiz_answers(id, session_id, question_id, answer, is_correct, answered_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-    rusqlite::params![ans_id, args.session_id, args.question_id, args.answer, if is_correct { 1 } else { 0 }, now],
+    rusqlite::params![ans_id_for_db, session_id.clone(), question_id.clone(), answer.clone(), if is_correct { 1 } else { 0 }, now],
   );
   if let Err(e) = res {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+
+  let ans_payload = serde_json::json!({
+    "answerId": ans_id.clone(),
+    "sessionId": session_id,
+    "questionId": question_id.clone(),
+    "answer": answer,
+    "isCorrect": is_correct,
+    "answeredAt": now
+  });
+  if let Err(e) = enqueue_outbox(
+    &tx,
+    &state.device_id,
+    "quiz_answer_submitted",
+    "quiz_answer",
+    ans_payload["answerId"].as_str().unwrap_or(""),
+    &ans_payload,
+    now,
+  ) {
+    let _ = tx.rollback();
     return db_error(e);
   }
 
   if points_delta != 0 {
     let pid = uuid::Uuid::new_v4().to_string();
-    let res = conn_user.execute(
+    let pid_for_db = pid.clone();
+    let res = tx.execute(
       "INSERT INTO points_ledger(id, reason, delta, occurred_at, ref_type, ref_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-      rusqlite::params![pid, "QUIZ_CORRECT", points_delta, now, "question", args.question_id],
+      rusqlite::params![pid_for_db, "QUIZ_CORRECT", points_delta, now, "question", question_id.clone()],
     );
     if let Err(e) = res {
+      let _ = tx.rollback();
       return db_error(e);
     }
+
+    let p_payload = serde_json::json!({
+      "id": pid.clone(),
+      "reason": "QUIZ_CORRECT",
+      "delta": points_delta,
+      "occurredAt": now,
+      "refType": "question",
+      "refId": question_id
+    });
+    if let Err(e) = enqueue_outbox(
+      &tx,
+      &state.device_id,
+      "points_add",
+      "points_ledger",
+      p_payload["id"].as_str().unwrap_or(""),
+      &p_payload,
+      now,
+    ) {
+      let _ = tx.rollback();
+      return db_error(e);
+    }
+  }
+
+  if let Err(e) = tx.commit() {
+    return db_error(e);
   }
 
   let total_points: i64 = match conn_user.query_row(
@@ -1978,39 +2074,97 @@ struct UserSetFavoriteResult {
   is_favorite: bool,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UserIsFavoriteArgs {
+  entity_type: String,
+  entity_id: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UserIsFavoriteResult {
+  is_favorite: bool,
+}
+
+#[tauri::command]
+fn user_is_favorite(state: tauri::State<'_, AppState>, args: UserIsFavoriteArgs) -> ApiResponse<UserIsFavoriteResult> {
+  use rusqlite::OptionalExtension;
+  let conn = match lock_user_db::<UserIsFavoriteResult>(&state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+  let v: Option<i64> = match conn
+    .query_row(
+      "SELECT 1 FROM favorites WHERE entity_type = ?1 AND entity_id = ?2",
+      rusqlite::params![args.entity_type, args.entity_id],
+      |row| row.get(0),
+    )
+    .optional()
+  {
+    Ok(x) => x,
+    Err(e) => return db_error(e),
+  };
+  ok(UserIsFavoriteResult { is_favorite: v.is_some() })
+}
+
 #[tauri::command]
 fn user_set_favorite(
   state: tauri::State<'_, AppState>,
   args: UserSetFavoriteArgs,
 ) -> ApiResponse<UserSetFavoriteResult> {
   let now = unix_ms();
-  let conn = match lock_user_db::<UserSetFavoriteResult>(&state) {
+  let entity_type = args.entity_type;
+  let entity_id = args.entity_id;
+  let is_favorite = args.is_favorite;
+  let mut conn = match lock_user_db::<UserSetFavoriteResult>(&state) {
     Ok(c) => c,
     Err(e) => return e,
   };
 
-  let res: rusqlite::Result<()> = if args.is_favorite {
-    conn
-      .execute(
-        "INSERT OR REPLACE INTO favorites(entity_type, entity_id, created_at) VALUES (?1, ?2, ?3)",
-        rusqlite::params![args.entity_type, args.entity_id, now],
-      )
-      .map(|_| ())
-  } else {
-    conn
-      .execute(
-        "DELETE FROM favorites WHERE entity_type = ?1 AND entity_id = ?2",
-        rusqlite::params![args.entity_type, args.entity_id],
-      )
-      .map(|_| ())
+  let tx = match conn.transaction() {
+    Ok(t) => t,
+    Err(e) => return db_error(e),
   };
 
+  let res: rusqlite::Result<()> = if is_favorite {
+    tx.execute(
+      "INSERT OR REPLACE INTO favorites(entity_type, entity_id, created_at) VALUES (?1, ?2, ?3)",
+      rusqlite::params![entity_type, entity_id, now],
+    )
+    .map(|_| ())
+  } else {
+    tx.execute(
+      "DELETE FROM favorites WHERE entity_type = ?1 AND entity_id = ?2",
+      rusqlite::params![entity_type, entity_id],
+    )
+    .map(|_| ())
+  };
   if let Err(e) = res {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+
+  let payload = serde_json::json!({ "isFavorite": is_favorite });
+  if let Err(e) = enqueue_outbox(
+    &tx,
+    &state.device_id,
+    "favorite_set",
+    &entity_type,
+    &entity_id,
+    &payload,
+    now,
+  ) {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+
+  if let Err(e) = tx.commit() {
     return db_error(e);
   }
 
   ok(UserSetFavoriteResult {
-    is_favorite: args.is_favorite,
+    is_favorite,
   })
 }
 
@@ -2071,6 +2225,7 @@ fn user_update_settings(
     Err(e) => return db_error(e),
   };
 
+  let patch_for_outbox = args.patch.clone();
   for (k, v) in args.patch {
     let k = k.trim().to_string();
     if k.is_empty() {
@@ -2087,6 +2242,24 @@ fn user_update_settings(
     }
   }
 
+  let mut patch_obj = serde_json::Map::new();
+  for (k, v) in patch_for_outbox {
+    patch_obj.insert(k, serde_json::Value::String(v));
+  }
+  let payload = serde_json::json!({ "patch": serde_json::Value::Object(patch_obj) });
+  if let Err(e) = enqueue_outbox(
+    &tx,
+    &state.device_id,
+    "settings_patch",
+    "settings",
+    "settings",
+    &payload,
+    now,
+  ) {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+
   if let Err(e) = tx.commit() {
     return db_error(e);
   }
@@ -2097,6 +2270,967 @@ fn user_update_settings(
   };
 
   ok(UserSettings { items })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UserProfile {
+  nickname: String,
+  avatar_color: String,
+  avatar_image_data_url: String,
+}
+
+fn user_get_profile_inner(conn: &rusqlite::Connection) -> rusqlite::Result<UserProfile> {
+  use rusqlite::OptionalExtension;
+  let nickname: Option<String> = conn
+    .query_row(
+      "SELECT value FROM profile WHERE key = 'nickname'",
+      [],
+      |row| row.get(0),
+    )
+    .optional()?;
+  let avatar_color: Option<String> = conn
+    .query_row(
+      "SELECT value FROM profile WHERE key = 'avatarColor'",
+      [],
+      |row| row.get(0),
+    )
+    .optional()?;
+  let avatar_image_data_url: Option<String> = conn
+    .query_row(
+      "SELECT value FROM profile WHERE key = 'avatarImageDataUrl'",
+      [],
+      |row| row.get(0),
+    )
+    .optional()?;
+  Ok(UserProfile {
+    nickname: nickname.unwrap_or_default(),
+    avatar_color: avatar_color.unwrap_or_default(),
+    avatar_image_data_url: avatar_image_data_url.unwrap_or_default(),
+  })
+}
+
+#[tauri::command]
+fn user_get_profile(state: tauri::State<'_, AppState>) -> ApiResponse<UserProfile> {
+  let conn = match lock_user_db::<UserProfile>(&state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+  let p = match user_get_profile_inner(&conn) {
+    Ok(v) => v,
+    Err(e) => return db_error(e),
+  };
+  ok(p)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UserUpdateProfileArgs {
+  nickname: Option<String>,
+  avatar_color: Option<String>,
+  avatar_image_data_url: Option<String>,
+}
+
+#[tauri::command]
+fn user_update_profile(state: tauri::State<'_, AppState>, args: UserUpdateProfileArgs) -> ApiResponse<UserProfile> {
+  let now = unix_ms();
+  let mut conn = match lock_user_db::<UserProfile>(&state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+  let tx = match conn.transaction() {
+    Ok(t) => t,
+    Err(e) => return db_error(e),
+  };
+
+  let mut patch_obj = serde_json::Map::new();
+
+  if let Some(v) = args.nickname {
+    let vv = v.trim().to_string();
+    let _ = tx.execute(
+      "INSERT OR REPLACE INTO profile(key, value, updated_at) VALUES ('nickname', ?1, ?2)",
+      rusqlite::params![vv.clone(), now],
+    );
+    patch_obj.insert("nickname".to_string(), serde_json::Value::String(vv));
+  }
+  if let Some(v) = args.avatar_color {
+    let vv = v.trim().to_string();
+    let _ = tx.execute(
+      "INSERT OR REPLACE INTO profile(key, value, updated_at) VALUES ('avatarColor', ?1, ?2)",
+      rusqlite::params![vv.clone(), now],
+    );
+    patch_obj.insert("avatarColor".to_string(), serde_json::Value::String(vv));
+  }
+  if let Some(v) = args.avatar_image_data_url {
+    let vv = v.trim().to_string();
+    let _ = tx.execute(
+      "INSERT OR REPLACE INTO profile(key, value, updated_at) VALUES ('avatarImageDataUrl', ?1, ?2)",
+      rusqlite::params![vv, now],
+    );
+  }
+
+  if !patch_obj.is_empty() {
+    let payload = serde_json::json!({ "patch": serde_json::Value::Object(patch_obj) });
+    if let Err(e) = enqueue_outbox(&tx, &state.device_id, "profile_patch", "profile", "profile", &payload, now) {
+      let _ = tx.rollback();
+      return db_error(e);
+    }
+  }
+
+  if let Err(e) = tx.commit() {
+    return db_error(e);
+  }
+
+  let p = match user_get_profile_inner(&conn) {
+    Ok(v) => v,
+    Err(e) => return db_error(e),
+  };
+  ok(p)
+}
+
+const SETTINGS_SYNC_BASE_URL: &str = "syncBaseUrl";
+const SETTINGS_SYNC_ACCESS_TOKEN: &str = "syncAccessToken";
+const SETTINGS_SYNC_USERNAME: &str = "syncUsername";
+const DEFAULT_SYNC_BASE_URL: &str = "http://127.0.0.1:8788";
+
+fn enqueue_outbox(
+  conn: &rusqlite::Connection,
+  device_id: &str,
+  event_type: &str,
+  entity_type: &str,
+  entity_id: &str,
+  payload: &serde_json::Value,
+  occurred_at: i64,
+) -> rusqlite::Result<String> {
+  let event_id = uuid::Uuid::new_v4().to_string();
+  let payload_json = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string());
+  conn.execute(
+    "INSERT INTO sync_outbox(event_id, device_id, event_type, entity_type, entity_id, payload_json, occurred_at, sent_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
+    rusqlite::params![
+      event_id,
+      device_id,
+      event_type,
+      entity_type,
+      entity_id,
+      payload_json,
+      occurred_at
+    ],
+  )?;
+  Ok(event_id)
+}
+
+fn ensure_device_row(conn: &rusqlite::Connection, device_id: &str, now: i64) -> rusqlite::Result<()> {
+  conn.execute(
+    "INSERT OR IGNORE INTO device(device_id, created_at, last_seen_at) VALUES (?1, ?2, ?2)",
+    rusqlite::params![device_id, now],
+  )?;
+  conn.execute(
+    "UPDATE device SET last_seen_at = ?2 WHERE device_id = ?1",
+    rusqlite::params![device_id, now],
+  )?;
+  Ok(())
+}
+
+fn get_setting(conn: &rusqlite::Connection, key: &str) -> rusqlite::Result<Option<(String, i64)>> {
+  use rusqlite::OptionalExtension;
+  conn
+    .query_row(
+      "SELECT value, updated_at FROM settings WHERE key = ?1",
+      rusqlite::params![key],
+      |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+}
+
+fn set_setting(
+  conn: &rusqlite::Connection,
+  key: &str,
+  value: &str,
+  now: i64,
+) -> rusqlite::Result<()> {
+  conn.execute(
+    "INSERT OR REPLACE INTO settings(key, value, updated_at) VALUES (?1, ?2, ?3)",
+    rusqlite::params![key, value, now],
+  )?;
+  Ok(())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthState {
+  is_logged_in: bool,
+  base_url: Option<String>,
+  username: Option<String>,
+}
+
+#[tauri::command]
+fn auth_get_state(state: tauri::State<'_, AppState>) -> ApiResponse<AuthState> {
+  let conn = match lock_user_db::<AuthState>(&state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+
+  let base_url = match get_setting(&conn, SETTINGS_SYNC_BASE_URL) {
+    Ok(v) => Some(v.map(|x| x.0).unwrap_or_else(|| DEFAULT_SYNC_BASE_URL.to_string())),
+    Err(e) => return db_error(e),
+  };
+  let token = match get_setting(&conn, SETTINGS_SYNC_ACCESS_TOKEN) {
+    Ok(v) => v.map(|x| x.0),
+    Err(e) => return db_error(e),
+  };
+  let username = match get_setting(&conn, SETTINGS_SYNC_USERNAME) {
+    Ok(v) => v.map(|x| x.0),
+    Err(e) => return db_error(e),
+  };
+
+  ok(AuthState {
+    is_logged_in: token.as_ref().is_some_and(|t| !t.trim().is_empty()),
+    base_url,
+    username,
+  })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthLoginArgs {
+  base_url: Option<String>,
+  username: Option<String>,
+  password: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthLoginResponse {
+  access_token: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthLoginResult {
+  access_token: String,
+}
+
+#[tauri::command]
+fn auth_login(state: tauri::State<'_, AppState>, args: AuthLoginArgs) -> ApiResponse<AuthLoginResult> {
+  let conn_for_base = match lock_user_db::<AuthLoginResult>(&state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+  let mut base = args
+    .base_url
+    .or_else(|| get_setting(&conn_for_base, SETTINGS_SYNC_BASE_URL).ok().flatten().map(|x| x.0))
+    .unwrap_or_else(|| DEFAULT_SYNC_BASE_URL.to_string());
+  base = base.trim().trim_end_matches('/').to_string();
+  drop(conn_for_base);
+
+  let username_for_server = args.username.clone().unwrap_or_else(|| "user".to_string());
+  let url = format!("{}/v1/auth/login", base);
+  let payload = serde_json::json!({
+    "username": username_for_server,
+    "password": args.password.unwrap_or_default(),
+    "deviceId": state.device_id.clone()
+  });
+
+  let resp = match http_agent()
+    .post(&url)
+    .header("Content-Type", "application/json")
+    .send_json(payload)
+  {
+    Ok(r) => r,
+    Err(e) => match e {
+      ureq::Error::StatusCode(401) => return invalid_argument("用户名或密码错误"),
+      _ => return invalid_argument(&format!("登录失败：{}", e)),
+    },
+  };
+
+  let text = match resp.into_body().read_to_string() {
+    Ok(s) => s,
+    Err(e) => return invalid_argument(&format!("登录响应读取失败：{}", e)),
+  };
+  let parsed: AuthLoginResponse = match serde_json::from_str(&text) {
+    Ok(v) => v,
+    Err(e) => return invalid_argument(&format!("登录响应解析失败：{}", e)),
+  };
+
+  let now = unix_ms();
+  let mut conn = match lock_user_db::<AuthLoginResult>(&state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+  let tx = match conn.transaction() {
+    Ok(t) => t,
+    Err(e) => return db_error(e),
+  };
+  if let Err(e) = set_setting(&tx, SETTINGS_SYNC_BASE_URL, &base, now) {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+  if let Err(e) = set_setting(&tx, SETTINGS_SYNC_ACCESS_TOKEN, &parsed.access_token, now) {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+  if let Err(e) = set_setting(&tx, SETTINGS_SYNC_USERNAME, &username_for_server, now) {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+  if let Err(e) = tx.commit() {
+    return db_error(e);
+  }
+
+  ok(AuthLoginResult {
+    access_token: parsed.access_token,
+  })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthSetServerArgs {
+  base_url: String,
+}
+
+#[tauri::command]
+fn auth_set_server(state: tauri::State<'_, AppState>, args: AuthSetServerArgs) -> ApiResponse<AuthState> {
+  let now = unix_ms();
+  let v = args.base_url.trim().trim_end_matches('/').to_string();
+  let mut conn = match lock_user_db::<AuthState>(&state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+  let tx = match conn.transaction() {
+    Ok(t) => t,
+    Err(e) => return db_error(e),
+  };
+  if v.is_empty() {
+    if let Err(e) = tx.execute(
+      "DELETE FROM settings WHERE key = ?1",
+      rusqlite::params![SETTINGS_SYNC_BASE_URL],
+    ) {
+      let _ = tx.rollback();
+      return db_error(e);
+    }
+  } else if let Err(e) = set_setting(&tx, SETTINGS_SYNC_BASE_URL, &v, now) {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+  if let Err(e) = tx.commit() {
+    return db_error(e);
+  }
+  drop(conn);
+  auth_get_state(state)
+}
+
+#[tauri::command]
+fn auth_logout(state: tauri::State<'_, AppState>) -> ApiResponse<bool> {
+  let mut conn = match lock_user_db::<bool>(&state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+  let tx = match conn.transaction() {
+    Ok(t) => t,
+    Err(e) => return db_error(e),
+  };
+  if let Err(e) = tx.execute(
+    "DELETE FROM settings WHERE key = ?1",
+    rusqlite::params![SETTINGS_SYNC_ACCESS_TOKEN],
+  ) {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+  let _ = tx.execute(
+    "DELETE FROM settings WHERE key = ?1",
+    rusqlite::params![SETTINGS_SYNC_USERNAME],
+  );
+  if let Err(e) = tx.execute(
+    "UPDATE device SET sync_cursor = NULL, last_sync_at = NULL WHERE device_id = ?1",
+    rusqlite::params![state.device_id.clone()],
+  ) {
+    let _ = tx.rollback();
+    return db_error(e);
+  }
+  if let Err(e) = tx.commit() {
+    return db_error(e);
+  }
+  ok(true)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncState {
+  pending_count: i64,
+  last_sync_at: Option<i64>,
+  cursor: Option<String>,
+}
+
+#[tauri::command]
+fn sync_get_state(state: tauri::State<'_, AppState>) -> ApiResponse<SyncState> {
+  let now = unix_ms();
+  let conn = match lock_user_db::<SyncState>(&state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+  if let Err(e) = ensure_device_row(&conn, &state.device_id, now) {
+    return db_error(e);
+  }
+
+  let pending_count: i64 = match conn.query_row(
+    "SELECT COUNT(1) FROM sync_outbox WHERE sent_at IS NULL",
+    [],
+    |row| row.get(0),
+  ) {
+    Ok(v) => v,
+    Err(e) => return db_error(e),
+  };
+
+  let device_row: rusqlite::Result<(Option<i64>, Option<String>)> = conn.query_row(
+    "SELECT last_sync_at, sync_cursor FROM device WHERE device_id = ?1",
+    rusqlite::params![state.device_id.clone()],
+    |row| Ok((row.get(0)?, row.get(1)?)),
+  );
+  let (last_sync_at, cursor) = match device_row {
+    Ok(v) => v,
+    Err(e) => return db_error(e),
+  };
+
+  ok(SyncState {
+    pending_count,
+    last_sync_at,
+    cursor,
+  })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncRunArgs {
+  mode: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncRunResult {
+  pushed: i64,
+  pulled: i64,
+  pending_count: i64,
+  last_sync_at: Option<i64>,
+  cursor: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SyncEventWire {
+  event_id: String,
+  device_id: String,
+  event_type: String,
+  entity_type: String,
+  entity_id: String,
+  payload: serde_json::Value,
+  occurred_at: i64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncPushRequest {
+  events: Vec<SyncEventWire>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncPushResponse {
+  acked: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncPullResponse {
+  events: Vec<SyncEventWire>,
+  next_cursor: String,
+}
+
+fn apply_sync_event(
+  conn: &rusqlite::Connection,
+  ev: &SyncEventWire,
+  applied_at: i64,
+) -> rusqlite::Result<bool> {
+  use rusqlite::OptionalExtension;
+  let already: Option<i64> = conn
+    .query_row(
+      "SELECT 1 FROM sync_applied WHERE event_id = ?1",
+      rusqlite::params![ev.event_id.clone()],
+      |row| row.get(0),
+    )
+    .optional()?;
+  if already.is_some() {
+    return Ok(false);
+  }
+
+  match ev.event_type.as_str() {
+    "favorite_set" => {
+      let is_favorite = ev
+        .payload
+        .get("isFavorite")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+      if is_favorite {
+        conn.execute(
+          "INSERT OR REPLACE INTO favorites(entity_type, entity_id, created_at) VALUES (?1, ?2, ?3)",
+          rusqlite::params![ev.entity_type.clone(), ev.entity_id.clone(), ev.occurred_at],
+        )?;
+      } else {
+        conn.execute(
+          "DELETE FROM favorites WHERE entity_type = ?1 AND entity_id = ?2",
+          rusqlite::params![ev.entity_type.clone(), ev.entity_id.clone()],
+        )?;
+      }
+    }
+    "points_add" => {
+      let id = ev
+        .payload
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(ev.entity_id.as_str())
+        .to_string();
+      let reason = ev
+        .payload
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("SYNC")
+        .to_string();
+      let delta = ev.payload.get("delta").and_then(|v| v.as_i64()).unwrap_or(0);
+      let occurred_at = ev
+        .payload
+        .get("occurredAt")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(ev.occurred_at);
+      let ref_type = ev.payload.get("refType").and_then(|v| v.as_str()).map(|s| s.to_string());
+      let ref_id = ev.payload.get("refId").and_then(|v| v.as_str()).map(|s| s.to_string());
+      conn.execute(
+        "INSERT OR IGNORE INTO points_ledger(id, reason, delta, occurred_at, ref_type, ref_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![id, reason, delta, occurred_at, ref_type, ref_id],
+      )?;
+    }
+    "settings_patch" => {
+      if let Some(patch) = ev.payload.get("patch").and_then(|v| v.as_object()) {
+        for (k, vv) in patch {
+          let Some(vs) = vv.as_str() else { continue };
+          let existing: Option<i64> = conn
+            .query_row(
+              "SELECT updated_at FROM settings WHERE key = ?1",
+              rusqlite::params![k.clone()],
+              |row| row.get(0),
+            )
+            .optional()?;
+          if existing.is_none() || existing.unwrap_or(0) <= ev.occurred_at {
+            conn.execute(
+              "INSERT OR REPLACE INTO settings(key, value, updated_at) VALUES (?1, ?2, ?3)",
+              rusqlite::params![k.clone(), vs.to_string(), ev.occurred_at],
+            )?;
+          }
+        }
+      }
+    }
+    "profile_patch" => {
+      if let Some(patch) = ev.payload.get("patch").and_then(|v| v.as_object()) {
+        for (k, vv) in patch {
+          let Some(vs) = vv.as_str() else { continue };
+          let existing: Option<i64> = conn
+            .query_row(
+              "SELECT updated_at FROM profile WHERE key = ?1",
+              rusqlite::params![k.clone()],
+              |row| row.get(0),
+            )
+            .optional()?;
+          if existing.is_none() || existing.unwrap_or(0) <= ev.occurred_at {
+            conn.execute(
+              "INSERT OR REPLACE INTO profile(key, value, updated_at) VALUES (?1, ?2, ?3)",
+              rusqlite::params![k.clone(), vs.to_string(), ev.occurred_at],
+            )?;
+          }
+        }
+      }
+    }
+    "quiz_session_started" => {
+      let sid = ev
+        .payload
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or(ev.entity_id.as_str())
+        .to_string();
+      let mode = ev
+        .payload
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("daily")
+        .to_string();
+      let started_at = ev
+        .payload
+        .get("startedAt")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(ev.occurred_at);
+      conn.execute(
+        "INSERT OR IGNORE INTO quiz_sessions(session_id, mode, started_at) VALUES (?1, ?2, ?3)",
+        rusqlite::params![sid, mode, started_at],
+      )?;
+    }
+    "quiz_answer_submitted" => {
+      let aid = ev
+        .payload
+        .get("answerId")
+        .and_then(|v| v.as_str())
+        .unwrap_or(ev.entity_id.as_str())
+        .to_string();
+      let sid = ev
+        .payload
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+      let qid = ev
+        .payload
+        .get("questionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+      let ans = ev
+        .payload
+        .get("answer")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+      let is_correct = ev
+        .payload
+        .get("isCorrect")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+      let answered_at = ev
+        .payload
+        .get("answeredAt")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(ev.occurred_at);
+      conn.execute(
+        "INSERT OR IGNORE INTO quiz_answers(id, session_id, question_id, answer, is_correct, answered_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![aid, sid, qid, ans, if is_correct { 1 } else { 0 }, answered_at],
+      )?;
+    }
+    _ => {}
+  }
+
+  conn.execute(
+    "INSERT OR IGNORE INTO sync_applied(event_id, applied_at) VALUES (?1, ?2)",
+    rusqlite::params![ev.event_id.clone(), applied_at],
+  )?;
+
+  Ok(true)
+}
+
+#[tauri::command]
+async fn sync_run(
+  state: tauri::State<'_, AppState>,
+  args: SyncRunArgs,
+) -> Result<ApiResponse<SyncRunResult>, ()> {
+  let app = state.inner().clone();
+  let r = match tauri::async_runtime::spawn_blocking(move || sync_run_inner(&app, args)).await {
+    Ok(v) => v,
+    Err(e) => ApiResponse {
+      ok: false,
+      data: None,
+      error: Some(ApiError {
+        code: "INTERNAL".to_string(),
+        message: format!("sync_run join failed: {}", e),
+        details: serde_json::Value::Null,
+      }),
+    },
+  };
+  Ok(r)
+}
+
+fn lock_user_db_app<'a, T>(state: &'a AppState) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, ApiResponse<T>>
+where
+  T: serde::Serialize,
+{
+  state.user_db.lock().map_err(|_| {
+    ApiResponse {
+      ok: false,
+      data: None,
+      error: Some(ApiError {
+        code: "INTERNAL".to_string(),
+        message: "DB lock poisoned".to_string(),
+        details: serde_json::Value::Null,
+      }),
+    }
+  })
+}
+
+fn sync_run_inner(state: &AppState, args: SyncRunArgs) -> ApiResponse<SyncRunResult> {
+  let now = unix_ms();
+  let mode = args.mode.trim().to_lowercase();
+  if mode != "push" && mode != "pull" && mode != "both" {
+    return invalid_argument("mode 必须是 push / pull / both");
+  }
+
+  let conn = match lock_user_db_app::<SyncRunResult>(state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+  if let Err(e) = ensure_device_row(&conn, &state.device_id, now) {
+    return db_error(e);
+  }
+
+  let base_url = match get_setting(&conn, SETTINGS_SYNC_BASE_URL) {
+    Ok(v) => v.map(|x| x.0).unwrap_or_else(|| DEFAULT_SYNC_BASE_URL.to_string()),
+    Err(e) => return db_error(e),
+  };
+  let token = match get_setting(&conn, SETTINGS_SYNC_ACCESS_TOKEN) {
+    Ok(v) => v.map(|x| x.0).unwrap_or_default(),
+    Err(e) => return db_error(e),
+  };
+  if token.trim().is_empty() {
+    return invalid_argument("请先登录");
+  }
+  drop(conn);
+
+  let mut pushed: i64 = 0;
+  let mut pulled: i64 = 0;
+  let mut last_sync_at: Option<i64> = None;
+  let mut cursor: Option<String> = None;
+
+  if mode == "push" || mode == "both" {
+    let mut batch_guard: i32 = 0;
+    loop {
+      batch_guard += 1;
+      if batch_guard > 20 {
+        break;
+      }
+
+      let conn = match lock_user_db_app::<SyncRunResult>(state) {
+        Ok(c) => c,
+        Err(e) => return e,
+      };
+      let mut events: Vec<SyncEventWire> = Vec::new();
+      let res = (|| -> rusqlite::Result<()> {
+        let mut stmt = conn.prepare(
+          "SELECT event_id, device_id, event_type, entity_type, entity_id, payload_json, occurred_at FROM sync_outbox WHERE sent_at IS NULL ORDER BY occurred_at ASC LIMIT 200",
+        )?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+          let payload_json: String = row.get(5)?;
+          let payload: serde_json::Value =
+            serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+          events.push(SyncEventWire {
+            event_id: row.get(0)?,
+            device_id: row.get(1)?,
+            event_type: row.get(2)?,
+            entity_type: row.get(3)?,
+            entity_id: row.get(4)?,
+            payload,
+            occurred_at: row.get(6)?,
+          });
+        }
+        Ok(())
+      })();
+      if let Err(e) = res {
+        return db_error(e);
+      }
+      drop(conn);
+
+      if events.is_empty() {
+        break;
+      }
+
+      let url = format!("{}/v1/sync/push", base_url.trim_end_matches('/'));
+      let req = SyncPushRequest { events };
+      let resp = match http_agent()
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", &format!("Bearer {}", token))
+        .send_json(req)
+      {
+        Ok(r) => r,
+        Err(e) => match e {
+          ureq::Error::StatusCode(401) => {
+            let _ = clear_sync_auth(state, now);
+            return invalid_argument("登录已失效，请重新登录");
+          }
+          _ => return invalid_argument(&format!("push 失败：{}", e)),
+        },
+      };
+
+      let text = match resp.into_body().read_to_string() {
+        Ok(s) => s,
+        Err(e) => return invalid_argument(&format!("push 响应读取失败：{}", e)),
+      };
+      let parsed: SyncPushResponse = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => return invalid_argument(&format!("push 响应解析失败：{}", e)),
+      };
+
+      let mut conn = match lock_user_db_app::<SyncRunResult>(state) {
+        Ok(c) => c,
+        Err(e) => return e,
+      };
+      let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => return db_error(e),
+      };
+      for eid in &parsed.acked {
+        let _ = tx.execute(
+          "UPDATE sync_outbox SET sent_at = ?2 WHERE event_id = ?1 AND sent_at IS NULL",
+          rusqlite::params![eid.clone(), now],
+        );
+      }
+      let _ = tx.execute(
+        "UPDATE device SET last_sync_at = ?2 WHERE device_id = ?1",
+        rusqlite::params![state.device_id.clone(), now],
+      );
+      if let Err(e) = tx.commit() {
+        return db_error(e);
+      }
+      pushed += parsed.acked.len() as i64;
+      last_sync_at = Some(now);
+      if parsed.acked.is_empty() {
+        break;
+      }
+    }
+  }
+
+  if mode == "pull" || mode == "both" {
+    let conn = match lock_user_db_app::<SyncRunResult>(state) {
+      Ok(c) => c,
+      Err(e) => return e,
+    };
+    let device_row: rusqlite::Result<Option<String>> = conn.query_row(
+      "SELECT sync_cursor FROM device WHERE device_id = ?1",
+      rusqlite::params![state.device_id.clone()],
+      |row| row.get(0),
+    );
+    let cursor_local = match device_row {
+      Ok(v) => v.unwrap_or_else(|| "0".to_string()),
+      Err(_) => "0".to_string(),
+    };
+    drop(conn);
+
+    let mut cursor_local = cursor_local;
+    let mut batch_guard: i32 = 0;
+    loop {
+      batch_guard += 1;
+      if batch_guard > 20 {
+        break;
+      }
+      let url = format!(
+        "{}/v1/sync/pull?cursor={}",
+        base_url.trim_end_matches('/'),
+        cursor_local
+      );
+      let resp = match http_agent()
+        .get(&url)
+        .header("Authorization", &format!("Bearer {}", token))
+        .call()
+      {
+        Ok(r) => r,
+        Err(e) => match e {
+          ureq::Error::StatusCode(401) => {
+            let _ = clear_sync_auth(state, now);
+            return invalid_argument("登录已失效，请重新登录");
+          }
+          _ => return invalid_argument(&format!("pull 失败：{}", e)),
+        },
+      };
+
+      let text = match resp.into_body().read_to_string() {
+        Ok(s) => s,
+        Err(e) => return invalid_argument(&format!("pull 响应读取失败：{}", e)),
+      };
+      let parsed: SyncPullResponse = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => return invalid_argument(&format!("pull 响应解析失败：{}", e)),
+      };
+
+      let mut conn = match lock_user_db_app::<SyncRunResult>(state) {
+        Ok(c) => c,
+        Err(e) => return e,
+      };
+      let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(e) => return db_error(e),
+      };
+      for ev in &parsed.events {
+        if let Err(e) = apply_sync_event(&tx, ev, now) {
+          let _ = tx.rollback();
+          return db_error(e);
+        }
+      }
+      if let Err(e) = tx.execute(
+        "UPDATE device SET last_sync_at = ?2, sync_cursor = ?3 WHERE device_id = ?1",
+        rusqlite::params![state.device_id.clone(), now, parsed.next_cursor.clone()],
+      ) {
+        let _ = tx.rollback();
+        return db_error(e);
+      }
+      if let Err(e) = tx.commit() {
+        return db_error(e);
+      }
+
+      pulled += parsed.events.len() as i64;
+      cursor = Some(parsed.next_cursor.clone());
+      last_sync_at = Some(now);
+
+      if parsed.events.is_empty() {
+        break;
+      }
+      if parsed.next_cursor.trim() == cursor_local.trim() {
+        break;
+      }
+      cursor_local = parsed.next_cursor.clone();
+    }
+  }
+
+  let conn = match lock_user_db_app::<SyncRunResult>(state) {
+    Ok(c) => c,
+    Err(e) => return e,
+  };
+  let pending_count: i64 = conn
+    .query_row("SELECT COUNT(1) FROM sync_outbox WHERE sent_at IS NULL", [], |row| row.get(0))
+    .unwrap_or(0);
+  let device_row: rusqlite::Result<(Option<i64>, Option<String>)> = conn.query_row(
+    "SELECT last_sync_at, sync_cursor FROM device WHERE device_id = ?1",
+    rusqlite::params![state.device_id.clone()],
+    |row| Ok((row.get(0)?, row.get(1)?)),
+  );
+  let (ls, cur) = device_row.unwrap_or((None, None));
+  if cursor.is_none() {
+    cursor = cur;
+  }
+  if last_sync_at.is_none() {
+    last_sync_at = ls;
+  }
+
+  ok(SyncRunResult {
+    pushed,
+    pulled,
+    pending_count,
+    last_sync_at,
+    cursor,
+  })
+}
+
+fn clear_sync_auth(state: &AppState, now: i64) -> rusqlite::Result<()> {
+  let mut conn = match state.user_db.lock() {
+    Ok(c) => c,
+    Err(_) => return Ok(()),
+  };
+  let tx = conn.transaction()?;
+  let _ = tx.execute(
+    "DELETE FROM settings WHERE key = ?1",
+    rusqlite::params![SETTINGS_SYNC_ACCESS_TOKEN],
+  );
+  let _ = tx.execute(
+    "DELETE FROM settings WHERE key = ?1",
+    rusqlite::params![SETTINGS_SYNC_USERNAME],
+  );
+  let _ = tx.execute(
+    "UPDATE device SET sync_cursor = NULL, last_sync_at = NULL, last_seen_at = ?2 WHERE device_id = ?1",
+    rusqlite::params![state.device_id.clone(), now],
+  );
+  tx.commit()?;
+  Ok(())
 }
 
 fn unix_ms() -> i64 {

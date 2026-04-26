@@ -1,0 +1,17 @@
+{
+  "nextSeq": 2,
+  "events": [
+    {
+      "seq": 1,
+      "eventId": "e1",
+      "deviceId": "d1",
+      "eventType": "favorite_set",
+      "entityType": "case",
+      "entityId": "case_demo",
+      "payload": {
+        "isFavorite": true
+      },
+      "occurredAt": 1
+    }
+  ]
+}

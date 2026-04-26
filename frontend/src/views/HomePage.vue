@@ -22,7 +22,6 @@ const apps = [
   { to: '/stories', label: '每日廉洁故事' },
   { to: '/quiz', label: '廉洁知识竞答' },
   { to: '/favorites', label: '我的收藏' },
-  { to: '/settings', label: '设置' },
 ]
 
 const slides = [

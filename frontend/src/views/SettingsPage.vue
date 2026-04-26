@@ -1,34 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useAppStore } from '../stores/app'
-import {
-  appBackupUserDb,
-  appDeleteBackup,
-  appGetDataDir,
-  appListBackups,
-  appRestoreUserDb,
-  contentApplyPack,
-  contentCheckUpdate,
-  contentDownloadUpdate,
-  contentImportDb,
-  userGetSettings,
-  userUpdateSettings,
-  type ApiResponse,
-  type BackupsList,
-  type ContentCheckUpdateResult,
-  type DataDirInfo,
-} from '../api/tauri'
+import { appBackupUserDb, appDeleteBackup, appGetDataDir, appListBackups, appRestoreUserDb, type ApiResponse, type BackupsList, type DataDirInfo } from '../api/tauri'
 
 const app = useAppStore()
 const dataDir = ref<ApiResponse<DataDirInfo> | null>(null)
 const backups = ref<ApiResponse<BackupsList> | null>(null)
 const busy = ref(false)
 const message = ref('')
-const contentSourcePath = ref('')
-const packPath = ref('')
-const updateBaseUrl = ref('')
-const updateInfo = ref<ApiResponse<ContentCheckUpdateResult> | null>(null)
-const downloadedPackPath = ref('')
 
 async function refreshBackups() {
   backups.value = await appListBackups()
@@ -45,9 +24,7 @@ function formatBytes(n: number) {
   return `${gb.toFixed(2)} GB`
 }
 
-function setMessage(s: string) {
-  message.value = s
-}
+function setMessage(s: string) { message.value = s }
 
 async function createBackup() {
   busy.value = true
@@ -99,121 +76,10 @@ async function deleteBackup(path: string) {
   }
 }
 
-async function importContentDb() {
-  const p = contentSourcePath.value.trim()
-  if (!p) {
-    setMessage('请先填写内容库文件路径（.db 或 .sqlite）')
-    return
-  }
-  const ok = window.confirm('确认导入内容库？导入会覆盖当前 content.db，但不会影响 user.db（收藏、积分等个人数据）。')
-  if (!ok) return
-  busy.value = true
-  try {
-    const r = await contentImportDb({ sourcePath: p })
-    if (r.ok) {
-      setMessage(`导入成功：内容版本 ${r.data.contentVersion}（已自动备份旧 content.db）`)
-      await app.refreshStatus()
-    } else {
-      setMessage(`${r.error.code} · ${r.error.message}`)
-    }
-  } finally {
-    busy.value = false
-  }
-}
-
-async function applyPack() {
-  const p = packPath.value.trim()
-  if (!p) {
-    setMessage('请先填写更新包路径（.zip）')
-    return
-  }
-  const ok = window.confirm('确认导入更新包？导入会覆盖当前 content.db，但不会影响 user.db（收藏、积分等个人数据）。')
-  if (!ok) return
-  busy.value = true
-  try {
-    const r = await contentApplyPack({ packPath: p })
-    if (r.ok) {
-      setMessage(`导入成功：内容版本 ${r.data.newContentVersion}（已自动备份旧 content.db）`)
-      await app.refreshStatus()
-    } else {
-      setMessage(`${r.error.code} · ${r.error.message}`)
-    }
-  } finally {
-    busy.value = false
-  }
-}
-
-async function loadSettings() {
-  const r = await userGetSettings()
-  if (r.ok) {
-    updateBaseUrl.value = r.data.items.contentUpdateBaseUrl ?? ''
-  }
-}
-
-async function saveUpdateBaseUrl() {
-  const v = updateBaseUrl.value.trim()
-  const r = await userUpdateSettings({ patch: { contentUpdateBaseUrl: v } })
-  if (r.ok) {
-    setMessage('已保存更新服务器地址')
-  } else {
-    setMessage(`${r.error.code} · ${r.error.message}`)
-  }
-}
-
-async function checkUpdate() {
-  const base = updateBaseUrl.value.trim()
-  if (!base) {
-    setMessage('请先填写更新服务器地址')
-    return
-  }
-  busy.value = true
-  try {
-    updateInfo.value = await contentCheckUpdate({ baseUrl: base })
-    downloadedPackPath.value = ''
-    if (updateInfo.value.ok) {
-      if (updateInfo.value.data.hasUpdate) {
-        setMessage(`发现新内容版本：${updateInfo.value.data.latestVersion}`)
-      } else {
-        setMessage('已是最新内容版本')
-      }
-    } else {
-      setMessage(`${updateInfo.value.error.code} · ${updateInfo.value.error.message}`)
-    }
-  } finally {
-    busy.value = false
-  }
-}
-
-async function downloadAndApply() {
-  if (!updateInfo.value?.ok) return
-  if (!updateInfo.value.data.hasUpdate) return
-  const ok = window.confirm('确认下载并更新内容库？更新前会自动备份当前 content.db。')
-  if (!ok) return
-  busy.value = true
-  try {
-    const d = await contentDownloadUpdate({ url: updateInfo.value.data.downloadUrl })
-    if (!d.ok) {
-      setMessage(`${d.error.code} · ${d.error.message}`)
-      return
-    }
-    downloadedPackPath.value = d.data.packPath
-    const a = await contentApplyPack({ packPath: d.data.packPath })
-    if (a.ok) {
-      setMessage(`更新完成：内容版本 ${a.data.newContentVersion}`)
-      await app.refreshStatus()
-    } else {
-      setMessage(`${a.error.code} · ${a.error.message}`)
-    }
-  } finally {
-    busy.value = false
-  }
-}
-
 onMounted(async () => {
   if (!app.status) await app.refreshStatus()
   dataDir.value = await appGetDataDir()
   await refreshBackups()
-  await loadSettings()
 })
 </script>
 
@@ -274,64 +140,9 @@ onMounted(async () => {
 
     <div class="section">
       <div class="sectionHead">
-        <div class="sectionTitle">内容库管理</div>
-        <button class="tute-btn" type="button" :disabled="busy" @click="importContentDb">
-          {{ busy ? '处理中…' : '导入内容库' }}
-        </button>
+        <div class="sectionTitle">提示</div>
       </div>
-      <div class="hint">
-        当前内容版本：<span v-if="app.status?.ok">{{ app.status.data.contentVersion }}</span><span v-else>—</span>
-      </div>
-      <div class="row">
-        <div class="k">内容库文件路径</div>
-        <input v-model="contentSourcePath" class="tute-input input" placeholder="例如：D:\content.db" />
-        <div class="tip">建议使用由 SQLite “VACUUM INTO” 导出的单文件内容库，避免携带 -wal/-shm 导致不完整。</div>
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="sectionHead">
-        <div class="sectionTitle">内容更新包</div>
-        <button class="tute-btn" type="button" :disabled="busy" @click="applyPack">
-          {{ busy ? '处理中…' : '导入更新包' }}
-        </button>
-      </div>
-      <div class="hint">更新包格式：zip（包含 manifest.json 与 content.db）</div>
-      <div class="row">
-        <div class="k">更新包路径</div>
-        <input v-model="packPath" class="tute-input input" placeholder="例如：D:\content-pack.zip" />
-        <div class="tip">导入前会自动备份当前 content.db 到 backups/。</div>
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="sectionHead">
-        <div class="sectionTitle">联机内容更新</div>
-        <button class="tute-btn-ghost" type="button" :disabled="busy" @click="saveUpdateBaseUrl">保存地址</button>
-      </div>
-      <div class="hint">用于自动检查内容版本与下载更新包（仍会本地备份并应用）。</div>
-      <div class="row">
-        <div class="k">更新服务器地址</div>
-        <input v-model="updateBaseUrl" class="tute-input input" placeholder="例如：http://127.0.0.1:8787" />
-        <div class="actionsInline">
-          <button class="tute-btn-ghost" type="button" :disabled="busy" @click="checkUpdate">检查更新</button>
-          <button
-            class="tute-btn"
-            type="button"
-            :disabled="busy || !updateInfo?.ok || !updateInfo.data.hasUpdate"
-            @click="downloadAndApply"
-          >
-            下载并更新
-          </button>
-        </div>
-        <div v-if="updateInfo?.ok" class="tip">
-          <span v-if="updateInfo.data.hasUpdate">最新版本：{{ updateInfo.data.latestVersion }}</span>
-          <span v-else>当前已是最新：{{ updateInfo.data.latestVersion }}</span>
-          <span v-if="updateInfo.data.notes"> · {{ updateInfo.data.notes }}</span>
-        </div>
-        <div v-else-if="updateInfo && !updateInfo.ok" class="tip">{{ updateInfo.error.code }} · {{ updateInfo.error.message }}</div>
-        <div v-if="downloadedPackPath" class="tip">已下载：{{ downloadedPackPath }}</div>
-      </div>
+      <div class="hint">账号登录与云同步设置已移至“账号”页面。</div>
     </div>
 
     <div v-if="message" class="message">{{ message }}</div>

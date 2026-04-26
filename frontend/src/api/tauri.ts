@@ -10,6 +10,18 @@ export type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: ApiError }
 
+function invokeError<T>(code: string, e: unknown): ApiResponse<T> {
+  const message = (() => {
+    try {
+      if (e && typeof e === 'object' && 'message' in e && typeof (e as any).message === 'string') return (e as any).message as string
+      return String(e)
+    } catch {
+      return 'unknown error'
+    }
+  })()
+  return { ok: false, error: { code, message, details: e } }
+}
+
 export type AppStatus = {
   appVersion: string
   contentVersion: string
@@ -53,6 +65,20 @@ export async function appRestoreUserDb(args: { backupPath: string }): Promise<Ap
 
 export async function appDeleteBackup(args: { backupPath: string }): Promise<ApiResponse<boolean>> {
   return await invoke('app_delete_backup', { args })
+}
+
+export type UserProfile = {
+  nickname: string
+  avatarColor: string
+  avatarImageDataUrl: string
+}
+
+export async function userGetProfile(): Promise<ApiResponse<UserProfile>> {
+  return await invoke('user_get_profile')
+}
+
+export async function userUpdateProfile(args: Partial<UserProfile>): Promise<ApiResponse<UserProfile>> {
+  return await invoke('user_update_profile', { args })
 }
 
 export type ContentVersion = { contentVersion: string }
@@ -258,7 +284,9 @@ export async function quizSubmitAnswer(args: {
   questionId: string
   answer: string
 }): Promise<ApiResponse<QuizSubmitAnswerResult>> {
-  return await invoke('quiz_submit_answer', { args })
+  const r = await invoke<ApiResponse<QuizSubmitAnswerResult>>('quiz_submit_answer', { args })
+  if (r.ok) notifyLocalWrite()
+  return r
 }
 
 export type QuizProgress = { totalPoints: number }
@@ -281,12 +309,21 @@ export async function userListFavorites(args: {
   return await invoke('user_list_favorites', { args })
 }
 
+export async function userIsFavorite(args: {
+  entityType: string
+  entityId: string
+}): Promise<ApiResponse<{ isFavorite: boolean }>> {
+  return await invoke('user_is_favorite', { args })
+}
+
 export async function userSetFavorite(args: {
   entityType: string
   entityId: string
   isFavorite: boolean
 }): Promise<ApiResponse<{ isFavorite: boolean }>> {
-  return await invoke('user_set_favorite', { args })
+  const r = await invoke<ApiResponse<{ isFavorite: boolean }>>('user_set_favorite', { args })
+  if (r.ok) notifyLocalWrite()
+  return r
 }
 
 export type UserSettings = { items: Record<string, string> }
@@ -296,5 +333,68 @@ export async function userGetSettings(): Promise<ApiResponse<UserSettings>> {
 }
 
 export async function userUpdateSettings(args: { patch: Record<string, string> }): Promise<ApiResponse<UserSettings>> {
-  return await invoke('user_update_settings', { args })
+  const r = await invoke<ApiResponse<UserSettings>>('user_update_settings', { args })
+  if (r.ok) notifyLocalWrite()
+  return r
+}
+
+function notifyLocalWrite() {
+  try {
+    window.dispatchEvent(new Event('cip-local-write'))
+  } catch {
+  }
+}
+
+export type AuthState = { isLoggedIn: boolean; baseUrl?: string | null; username?: string | null }
+
+export async function authGetState(): Promise<ApiResponse<AuthState>> {
+  try {
+    return await invoke('auth_get_state')
+  } catch (e) {
+    return invokeError('IPC_ERROR', e)
+  }
+}
+
+export type AuthLoginResult = { accessToken: string }
+
+export async function authLogin(args: {
+  baseUrl?: string
+  username?: string
+  password?: string
+}): Promise<ApiResponse<AuthLoginResult>> {
+  return await invoke('auth_login', { args })
+}
+
+export async function authSetServer(args: { baseUrl: string }): Promise<ApiResponse<AuthState>> {
+  return await invoke('auth_set_server', { args })
+}
+
+export async function authLogout(): Promise<ApiResponse<boolean>> {
+  return await invoke('auth_logout')
+}
+
+export type SyncState = { pendingCount: number; lastSyncAt?: number | null; cursor?: string | null }
+
+export async function syncGetState(): Promise<ApiResponse<SyncState>> {
+  try {
+    return await invoke('sync_get_state')
+  } catch (e) {
+    return invokeError('IPC_ERROR', e)
+  }
+}
+
+export type SyncRunResult = {
+  pushed: number
+  pulled: number
+  pendingCount: number
+  lastSyncAt?: number | null
+  cursor?: string | null
+}
+
+export async function syncRun(args: { mode: 'push' | 'pull' | 'both' }): Promise<ApiResponse<SyncRunResult>> {
+  try {
+    return await invoke('sync_run', { args })
+  } catch (e) {
+    return invokeError('IPC_ERROR', e)
+  }
 }

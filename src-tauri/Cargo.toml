@@ -7,6 +7,7 @@ license = ""
 repository = ""
 edition = "2021"
 rust-version = "1.77.2"
+default-run = "app"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -26,4 +27,4 @@ tauri-plugin-log = "2"
 uuid = { version = "1", features = ["v4"] }
 rusqlite = { version = "0.33", features = ["bundled"] }
 zip = "4"
-ureq = { version = "3", features = ["_tls"] }
+ureq = { version = "3", features = ["_tls", "json"] }

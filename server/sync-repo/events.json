@@ -1,0 +1,84 @@
+{
+  "nextSeq": 6,
+  "events": [
+    {
+      "seq": 1,
+      "eventId": "f53f64d1-f8ea-448d-aeea-399e1a931949",
+      "deviceId": "744a9edb-d8e6-4ff2-b0df-bea809a7e58f",
+      "eventType": "quiz_session_started",
+      "entityType": "quiz_session",
+      "entityId": "93d9241c-c82f-4022-a833-b3f20650dbff",
+      "payload": {
+        "mode": "daily",
+        "sessionId": "93d9241c-c82f-4022-a833-b3f20650dbff",
+        "startedAt": 1777014943251
+      },
+      "occurredAt": 1777014943251
+    },
+    {
+      "seq": 2,
+      "eventId": "5c2f8cbc-92f2-4392-b713-1a97a4827928",
+      "deviceId": "744a9edb-d8e6-4ff2-b0df-bea809a7e58f",
+      "eventType": "quiz_answer_submitted",
+      "entityType": "quiz_answer",
+      "entityId": "ae983bc6-5982-4b40-afde-797f5b837288",
+      "payload": {
+        "answer": "A",
+        "answerId": "ae983bc6-5982-4b40-afde-797f5b837288",
+        "answeredAt": 1777014944016,
+        "isCorrect": false,
+        "questionId": "q_demo_1",
+        "sessionId": "93d9241c-c82f-4022-a833-b3f20650dbff"
+      },
+      "occurredAt": 1777014944016
+    },
+    {
+      "seq": 3,
+      "eventId": "e4346e4a-66ab-45f3-9c6c-6566a61c5e0e",
+      "deviceId": "744a9edb-d8e6-4ff2-b0df-bea809a7e58f",
+      "eventType": "quiz_session_started",
+      "entityType": "quiz_session",
+      "entityId": "644a8373-473b-4079-9b85-2536e19c4d46",
+      "payload": {
+        "mode": "daily",
+        "sessionId": "644a8373-473b-4079-9b85-2536e19c4d46",
+        "startedAt": 1777014946858
+      },
+      "occurredAt": 1777014946858
+    },
+    {
+      "seq": 4,
+      "eventId": "af668c47-161a-4e9c-88a2-78a4820b12c6",
+      "deviceId": "744a9edb-d8e6-4ff2-b0df-bea809a7e58f",
+      "eventType": "quiz_answer_submitted",
+      "entityType": "quiz_answer",
+      "entityId": "59bf98c0-a12f-45c9-a7c9-98b4876d1dae",
+      "payload": {
+        "answer": "B",
+        "answerId": "59bf98c0-a12f-45c9-a7c9-98b4876d1dae",
+        "answeredAt": 1777014948718,
+        "isCorrect": true,
+        "questionId": "q_demo_1",
+        "sessionId": "644a8373-473b-4079-9b85-2536e19c4d46"
+      },
+      "occurredAt": 1777014948718
+    },
+    {
+      "seq": 5,
+      "eventId": "8b607670-f7a1-403b-bcc0-12d1fe652a76",
+      "deviceId": "744a9edb-d8e6-4ff2-b0df-bea809a7e58f",
+      "eventType": "points_add",
+      "entityType": "points_ledger",
+      "entityId": "d3817544-b0ca-4307-a55d-f9cbed6ef32a",
+      "payload": {
+        "delta": 10,
+        "id": "d3817544-b0ca-4307-a55d-f9cbed6ef32a",
+        "occurredAt": 1777014948718,
+        "reason": "QUIZ_CORRECT",
+        "refId": "q_demo_1",
+        "refType": "question"
+      },
+      "occurredAt": 1777014948718
+    }
+  ]
+}
