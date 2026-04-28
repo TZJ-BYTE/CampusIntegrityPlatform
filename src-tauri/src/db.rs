@@ -159,6 +159,7 @@ fn migrate_content_db(conn: &Connection) -> rusqlite::Result<()> {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       type TEXT NOT NULL,
+      cover_url TEXT,
       location TEXT,
       description TEXT,
       contact TEXT,
@@ -177,6 +178,7 @@ fn migrate_content_db(conn: &Connection) -> rusqlite::Result<()> {
       title TEXT NOT NULL,
       scene TEXT NOT NULL,
       summary TEXT NOT NULL,
+      cover_url TEXT,
       body TEXT NOT NULL,
       violation TEXT,
       correct_action TEXT,
@@ -219,6 +221,7 @@ fn migrate_content_db(conn: &Connection) -> rusqlite::Result<()> {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       level TEXT NOT NULL,
+      cover_url TEXT,
       source TEXT,
       published_at TEXT,
       updated_at INTEGER NOT NULL
@@ -243,6 +246,7 @@ fn migrate_content_db(conn: &Connection) -> rusqlite::Result<()> {
     CREATE TABLE IF NOT EXISTS stories (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
+      cover_url TEXT,
       body TEXT NOT NULL,
       source TEXT,
       day_of_year INTEGER,
@@ -304,6 +308,11 @@ fn migrate_content_db(conn: &Connection) -> rusqlite::Result<()> {
       ON question_options(question_id, sort_order);
   "#,
   )?;
+
+  let _ = conn.execute("ALTER TABLE venues ADD COLUMN cover_url TEXT", []);
+  let _ = conn.execute("ALTER TABLE cases ADD COLUMN cover_url TEXT", []);
+  let _ = conn.execute("ALTER TABLE regulations ADD COLUMN cover_url TEXT", []);
+  let _ = conn.execute("ALTER TABLE stories ADD COLUMN cover_url TEXT", []);
 
   let schema: Option<i64> = conn
     .query_row(

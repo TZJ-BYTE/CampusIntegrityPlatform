@@ -5,6 +5,7 @@ import { contentGetRegulation, userIsFavorite, userSetFavorite, type ApiResponse
 import MediaPlaceholder from '../components/MediaPlaceholder.vue'
 import { useToastStore } from '../stores/toast'
 import { copyText } from '../utils/copy'
+import { resolveContentAssetUrl } from '../utils/contentAsset'
 import { animatePop } from '../utils/motion'
 
 const route = useRoute()
@@ -16,6 +17,10 @@ const loading = ref(false)
 const regulation = ref<ApiResponse<RegulationDetail> | null>(null)
 const isFavorite = ref(false)
 const activeSectionId = ref<string>('')
+const coverSrc = computed(() => {
+  if (!regulation.value?.ok) return undefined
+  return resolveContentAssetUrl(regulation.value.data.coverUrl) ?? undefined
+})
 
 const copyBtnEl = ref<HTMLElement | null>(null)
 const favBtnEl = ref<HTMLElement | null>(null)
@@ -130,7 +135,10 @@ async function copyCurrent() {
       </div>
 
       <div class="hero">
-        <MediaPlaceholder kind="image" label="封面图占位（法规学习）" ratio="21 / 9" />
+        <div v-if="coverSrc" class="heroCover" :style="{ aspectRatio: '21 / 9' }">
+          <img class="heroCoverImg" :src="coverSrc" :alt="regulation.data.title" />
+        </div>
+        <MediaPlaceholder v-else kind="image" label="封面图占位（法规学习）" ratio="21 / 9" />
         <div class="heroInfo">
           <div class="heroTitle">{{ regulation.data.title }}</div>
           <div class="heroMeta">
@@ -242,6 +250,17 @@ async function copyCurrent() {
   border-radius: 14px;
   overflow: hidden;
   background: #ffffff;
+}
+
+.heroCover {
+  background: #ffffff;
+}
+
+.heroCoverImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .heroInfo {

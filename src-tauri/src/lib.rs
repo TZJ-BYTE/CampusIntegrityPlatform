@@ -415,6 +415,7 @@ struct VenueListItem {
   name: String,
   #[serde(rename = "type")]
   type_: String,
+  cover_url: Option<String>,
 }
 
 #[tauri::command]
@@ -849,25 +850,25 @@ fn content_list_venues(
     match (like.as_ref(), type_.as_ref()) {
       (Some(k), Some(t)) => (
         "SELECT COUNT(1) FROM venues WHERE name LIKE ?1 AND type = ?2",
-        "SELECT id, name, type FROM venues WHERE name LIKE ?1 AND type = ?2 ORDER BY updated_at DESC LIMIT ?3 OFFSET ?4",
+        "SELECT id, name, type, cover_url FROM venues WHERE name LIKE ?1 AND type = ?2 ORDER BY updated_at DESC LIMIT ?3 OFFSET ?4",
         vec![k.clone().into(), t.clone().into()],
         vec![k.clone().into(), t.clone().into(), limit.into(), offset.into()],
       ),
       (Some(k), None) => (
         "SELECT COUNT(1) FROM venues WHERE name LIKE ?1",
-        "SELECT id, name, type FROM venues WHERE name LIKE ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
+        "SELECT id, name, type, cover_url FROM venues WHERE name LIKE ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
         vec![k.clone().into()],
         vec![k.clone().into(), limit.into(), offset.into()],
       ),
       (None, Some(t)) => (
         "SELECT COUNT(1) FROM venues WHERE type = ?1",
-        "SELECT id, name, type FROM venues WHERE type = ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
+        "SELECT id, name, type, cover_url FROM venues WHERE type = ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
         vec![t.clone().into()],
         vec![t.clone().into(), limit.into(), offset.into()],
       ),
       (None, None) => (
         "SELECT COUNT(1) FROM venues",
-        "SELECT id, name, type FROM venues ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
+        "SELECT id, name, type, cover_url FROM venues ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
         vec![],
         vec![limit.into(), offset.into()],
       ),
@@ -886,6 +887,7 @@ fn content_list_venues(
         id: row.get(0)?,
         name: row.get(1)?,
         type_: row.get(2)?,
+        cover_url: row.get(3)?,
       });
     }
     Ok(())
@@ -916,6 +918,7 @@ struct VenueDetail {
   name: String,
   #[serde(rename = "type")]
   type_: String,
+  cover_url: Option<String>,
   location: Option<String>,
   description: Option<String>,
   contact: Option<String>,
@@ -933,17 +936,18 @@ fn content_get_venue(
   };
 
   let res: rusqlite::Result<VenueDetail> = conn.query_row(
-    "SELECT id, name, type, location, description, contact, open_hours FROM venues WHERE id = ?1",
+    "SELECT id, name, type, cover_url, location, description, contact, open_hours FROM venues WHERE id = ?1",
     rusqlite::params![args.id],
     |row| {
       Ok(VenueDetail {
         id: row.get(0)?,
         name: row.get(1)?,
         type_: row.get(2)?,
-        location: row.get(3)?,
-        description: row.get(4)?,
-        contact: row.get(5)?,
-        open_hours: row.get(6)?,
+        cover_url: row.get(3)?,
+        location: row.get(4)?,
+        description: row.get(5)?,
+        contact: row.get(6)?,
+        open_hours: row.get(7)?,
       })
     },
   );
@@ -970,6 +974,7 @@ struct CaseListItem {
   title: String,
   scene: String,
   summary: String,
+  cover_url: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -1013,25 +1018,25 @@ fn content_list_cases(
   ) = match (keyword_fts.as_ref(), scene.as_ref()) {
     (Some(k), Some(s)) => (
       "SELECT COUNT(1) FROM cases c JOIN cases_fts f ON f.rowid = c.rowid WHERE f MATCH ?1 AND c.scene = ?2",
-      "SELECT c.id, c.title, c.scene, c.summary FROM cases c JOIN cases_fts f ON f.rowid = c.rowid WHERE f MATCH ?1 AND c.scene = ?2 ORDER BY c.updated_at DESC LIMIT ?3 OFFSET ?4",
+      "SELECT c.id, c.title, c.scene, c.summary, c.cover_url FROM cases c JOIN cases_fts f ON f.rowid = c.rowid WHERE f MATCH ?1 AND c.scene = ?2 ORDER BY c.updated_at DESC LIMIT ?3 OFFSET ?4",
       vec![k.clone().into(), s.clone().into()],
       vec![k.clone().into(), s.clone().into(), limit.into(), offset.into()],
     ),
     (Some(k), None) => (
       "SELECT COUNT(1) FROM cases c JOIN cases_fts f ON f.rowid = c.rowid WHERE f MATCH ?1",
-      "SELECT c.id, c.title, c.scene, c.summary FROM cases c JOIN cases_fts f ON f.rowid = c.rowid WHERE f MATCH ?1 ORDER BY c.updated_at DESC LIMIT ?2 OFFSET ?3",
+      "SELECT c.id, c.title, c.scene, c.summary, c.cover_url FROM cases c JOIN cases_fts f ON f.rowid = c.rowid WHERE f MATCH ?1 ORDER BY c.updated_at DESC LIMIT ?2 OFFSET ?3",
       vec![k.clone().into()],
       vec![k.clone().into(), limit.into(), offset.into()],
     ),
     (None, Some(s)) => (
       "SELECT COUNT(1) FROM cases WHERE scene = ?1",
-      "SELECT id, title, scene, summary FROM cases WHERE scene = ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
+      "SELECT id, title, scene, summary, cover_url FROM cases WHERE scene = ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
       vec![s.clone().into()],
       vec![s.clone().into(), limit.into(), offset.into()],
     ),
     (None, None) => (
       "SELECT COUNT(1) FROM cases",
-      "SELECT id, title, scene, summary FROM cases ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
+      "SELECT id, title, scene, summary, cover_url FROM cases ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
       vec![],
       vec![limit.into(), offset.into()],
     ),
@@ -1052,6 +1057,7 @@ fn content_list_cases(
         title: row.get(1)?,
         scene: row.get(2)?,
         summary: row.get(3)?,
+        cover_url: row.get(4)?,
       });
     }
     Ok(())
@@ -1077,6 +1083,7 @@ struct CaseDetail {
   title: String,
   scene: String,
   summary: String,
+  cover_url: Option<String>,
   body: String,
   violation: Option<String>,
   correct_action: Option<String>,
@@ -1093,7 +1100,7 @@ fn content_get_case(
   };
 
   let res: rusqlite::Result<CaseDetail> = conn.query_row(
-    "SELECT id, title, scene, summary, body, violation, correct_action FROM cases WHERE id = ?1",
+    "SELECT id, title, scene, summary, cover_url, body, violation, correct_action FROM cases WHERE id = ?1",
     rusqlite::params![args.id],
     |row| {
       Ok(CaseDetail {
@@ -1101,9 +1108,10 @@ fn content_get_case(
         title: row.get(1)?,
         scene: row.get(2)?,
         summary: row.get(3)?,
-        body: row.get(4)?,
-        violation: row.get(5)?,
-        correct_action: row.get(6)?,
+        cover_url: row.get(4)?,
+        body: row.get(5)?,
+        violation: row.get(6)?,
+        correct_action: row.get(7)?,
       })
     },
   );
@@ -1130,6 +1138,7 @@ struct RegulationListItem {
   title: String,
   level: String,
   published_at: Option<String>,
+  cover_url: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -1171,25 +1180,25 @@ fn content_list_regulations(
   ) = match (like.as_ref(), level.as_ref()) {
     (Some(k), Some(lv)) => (
       "SELECT COUNT(1) FROM regulations WHERE title LIKE ?1 AND level = ?2",
-      "SELECT id, title, level, published_at FROM regulations WHERE title LIKE ?1 AND level = ?2 ORDER BY updated_at DESC LIMIT ?3 OFFSET ?4",
+      "SELECT id, title, level, published_at, cover_url FROM regulations WHERE title LIKE ?1 AND level = ?2 ORDER BY updated_at DESC LIMIT ?3 OFFSET ?4",
       vec![k.clone().into(), lv.clone().into()],
       vec![k.clone().into(), lv.clone().into(), limit.into(), offset.into()],
     ),
     (Some(k), None) => (
       "SELECT COUNT(1) FROM regulations WHERE title LIKE ?1",
-      "SELECT id, title, level, published_at FROM regulations WHERE title LIKE ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
+      "SELECT id, title, level, published_at, cover_url FROM regulations WHERE title LIKE ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
       vec![k.clone().into()],
       vec![k.clone().into(), limit.into(), offset.into()],
     ),
     (None, Some(lv)) => (
       "SELECT COUNT(1) FROM regulations WHERE level = ?1",
-      "SELECT id, title, level, published_at FROM regulations WHERE level = ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
+      "SELECT id, title, level, published_at, cover_url FROM regulations WHERE level = ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
       vec![lv.clone().into()],
       vec![lv.clone().into(), limit.into(), offset.into()],
     ),
     (None, None) => (
       "SELECT COUNT(1) FROM regulations",
-      "SELECT id, title, level, published_at FROM regulations ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
+      "SELECT id, title, level, published_at, cover_url FROM regulations ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
       vec![],
       vec![limit.into(), offset.into()],
     ),
@@ -1210,6 +1219,7 @@ fn content_list_regulations(
         title: row.get(1)?,
         level: row.get(2)?,
         published_at: row.get(3)?,
+        cover_url: row.get(4)?,
       });
     }
     Ok(())
@@ -1238,6 +1248,7 @@ struct RegulationDetail {
   id: String,
   title: String,
   level: String,
+  cover_url: Option<String>,
   source: Option<String>,
   published_at: Option<String>,
   sections: Vec<RegulationSection>,
@@ -1253,14 +1264,14 @@ fn content_get_regulation(
     Err(e) => return e,
   };
 
-  let header: rusqlite::Result<(String, String, String, Option<String>, Option<String>)> =
+  let header: rusqlite::Result<(String, String, String, Option<String>, Option<String>, Option<String>)> =
     conn.query_row(
-      "SELECT id, title, level, source, published_at FROM regulations WHERE id = ?1",
+      "SELECT id, title, level, cover_url, source, published_at FROM regulations WHERE id = ?1",
       rusqlite::params![args.id.clone()],
-      |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+      |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
     );
 
-  let (id, title, level, source, published_at) = match header {
+  let (id, title, level, cover_url, source, published_at) = match header {
     Ok(v) => v,
     Err(rusqlite::Error::QueryReturnedNoRows) => {
       return ApiResponse {
@@ -1302,6 +1313,7 @@ fn content_get_regulation(
     id,
     title,
     level,
+    cover_url,
     source,
     published_at,
     sections,
@@ -1315,6 +1327,7 @@ struct StoryListItem {
   title: String,
   source: Option<String>,
   day_of_year: Option<i64>,
+  cover_url: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -1356,14 +1369,14 @@ fn content_list_stories(
   ) = if let Some(k) = keyword_fts.as_ref() {
     (
       "SELECT COUNT(1) FROM stories s JOIN stories_fts f ON f.rowid = s.rowid WHERE f MATCH ?1",
-      "SELECT s.id, s.title, s.source, s.day_of_year FROM stories s JOIN stories_fts f ON f.rowid = s.rowid WHERE f MATCH ?1 ORDER BY s.updated_at DESC LIMIT ?2 OFFSET ?3",
+      "SELECT s.id, s.title, s.source, s.day_of_year, s.cover_url FROM stories s JOIN stories_fts f ON f.rowid = s.rowid WHERE f MATCH ?1 ORDER BY s.updated_at DESC LIMIT ?2 OFFSET ?3",
       vec![k.clone().into()],
       vec![k.clone().into(), limit.into(), offset.into()],
     )
   } else {
     (
       "SELECT COUNT(1) FROM stories",
-      "SELECT id, title, source, day_of_year FROM stories ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
+      "SELECT id, title, source, day_of_year, cover_url FROM stories ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
       vec![],
       vec![limit.into(), offset.into()],
     )
@@ -1384,6 +1397,7 @@ fn content_list_stories(
         title: row.get(1)?,
         source: row.get(2)?,
         day_of_year: row.get(3)?,
+        cover_url: row.get(4)?,
       });
     }
     Ok(())
@@ -1401,6 +1415,7 @@ fn content_list_stories(
 struct StoryDetail {
   id: String,
   title: String,
+  cover_url: Option<String>,
   body: String,
   source: Option<String>,
   day_of_year: Option<i64>,
@@ -1417,15 +1432,16 @@ fn content_get_story(
   };
 
   let res: rusqlite::Result<StoryDetail> = conn.query_row(
-    "SELECT id, title, body, source, day_of_year FROM stories WHERE id = ?1",
+    "SELECT id, title, cover_url, body, source, day_of_year FROM stories WHERE id = ?1",
     rusqlite::params![args.id],
     |row| {
       Ok(StoryDetail {
         id: row.get(0)?,
         title: row.get(1)?,
-        body: row.get(2)?,
-        source: row.get(3)?,
-        day_of_year: row.get(4)?,
+        cover_url: row.get(2)?,
+        body: row.get(3)?,
+        source: row.get(4)?,
+        day_of_year: row.get(5)?,
       })
     },
   );
@@ -1468,15 +1484,16 @@ fn content_get_today_story(
   };
 
   let res: rusqlite::Result<StoryDetail> = conn.query_row(
-    "SELECT id, title, body, source, day_of_year FROM stories WHERE day_of_year = ?1 ORDER BY updated_at DESC LIMIT 1",
+    "SELECT id, title, cover_url, body, source, day_of_year FROM stories WHERE day_of_year = ?1 ORDER BY updated_at DESC LIMIT 1",
     rusqlite::params![day],
     |row| {
       Ok(StoryDetail {
         id: row.get(0)?,
         title: row.get(1)?,
-        body: row.get(2)?,
-        source: row.get(3)?,
-        day_of_year: row.get(4)?,
+        cover_url: row.get(2)?,
+        body: row.get(3)?,
+        source: row.get(4)?,
+        day_of_year: row.get(5)?,
       })
     },
   );
@@ -1485,15 +1502,16 @@ fn content_get_today_story(
     Ok(v) => ok(v),
     Err(rusqlite::Error::QueryReturnedNoRows) => {
       let fallback: rusqlite::Result<StoryDetail> = conn.query_row(
-        "SELECT id, title, body, source, day_of_year FROM stories WHERE id = ?1",
+        "SELECT id, title, cover_url, body, source, day_of_year FROM stories WHERE id = ?1",
         rusqlite::params!["story_demo"],
         |row| {
           Ok(StoryDetail {
             id: row.get(0)?,
             title: row.get(1)?,
-            body: row.get(2)?,
-            source: row.get(3)?,
-            day_of_year: row.get(4)?,
+            cover_url: row.get(2)?,
+            body: row.get(3)?,
+            source: row.get(4)?,
+            day_of_year: row.get(5)?,
           })
         },
       );

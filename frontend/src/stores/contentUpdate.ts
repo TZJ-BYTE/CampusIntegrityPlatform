@@ -1,8 +1,7 @@
 import { defineStore } from 'pinia'
 import { contentApplyPack, contentCheckUpdate, contentDownloadUpdate } from '../api/tauri'
 import { useAppStore } from './app'
-
-const DEFAULT_CONTENT_BASE_URL = 'http://127.0.0.1:8788'
+import { getServerBaseUrl } from '../utils/serverBaseUrl'
 
 export const useContentUpdateStore = defineStore('contentUpdate', {
   state: () => ({
@@ -21,7 +20,7 @@ export const useContentUpdateStore = defineStore('contentUpdate', {
       this.busy = true
       this.lastAttemptAt = now
       try {
-        const info = await contentCheckUpdate({ baseUrl: DEFAULT_CONTENT_BASE_URL })
+        const info = await contentCheckUpdate({ baseUrl: getServerBaseUrl() })
         if (!info.ok) return
         this.lastSuccessAt = now
         if (!info.data.hasUpdate) return

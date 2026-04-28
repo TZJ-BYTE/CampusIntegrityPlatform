@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import FeedCard from '../components/FeedCard.vue'
 import FeedLayout from '../components/FeedLayout.vue'
 import coverUrl from '../assets/placeholder-cover.svg'
+import { resolveContentAssetUrl } from '../utils/contentAsset'
 import {
   contentListVenues,
   type ApiResponse,
@@ -107,7 +108,7 @@ watch([keyword, typeFilter], async () => {
             meta="场所"
             :title="v.name"
             :subtitle="v.type"
-            :thumb="coverUrl"
+            :thumb="resolveContentAssetUrl(v.coverUrl) ?? coverUrl"
             :clickable="true"
             @click="openDetail(v.id)"
           >

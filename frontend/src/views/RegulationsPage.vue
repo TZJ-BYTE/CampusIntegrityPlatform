@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import FeedCard from '../components/FeedCard.vue'
 import FeedLayout from '../components/FeedLayout.vue'
 import coverUrl from '../assets/placeholder-cover.svg'
+import { resolveContentAssetUrl } from '../utils/contentAsset'
 import {
   contentListRegulations,
   type ApiResponse,
@@ -107,7 +108,7 @@ watch([keyword, level], async () => {
             :meta="r.publishedAt ?? '—'"
             :title="r.title"
             :subtitle="r.publishedAt ? `发布日期：${r.publishedAt}` : r.level"
-            :thumb="coverUrl"
+            :thumb="resolveContentAssetUrl(r.coverUrl) ?? coverUrl"
             :clickable="true"
             @click="openDetail(r.id)"
           >

@@ -3,6 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import FeedCard from '../components/FeedCard.vue'
 import FeedLayout from '../components/FeedLayout.vue'
+import coverUrl from '../assets/placeholder-cover.svg'
+import { resolveContentAssetUrl } from '../utils/contentAsset'
 import {
   contentListCases,
   type ApiResponse,
@@ -106,6 +108,7 @@ watch([keyword, scene], async () => {
             :meta="c.scene"
             :title="c.title"
             :subtitle="c.summary"
+            :thumb="resolveContentAssetUrl(c.coverUrl) ?? coverUrl"
             :clickable="true"
             @click="openDetail(c.id)"
           >

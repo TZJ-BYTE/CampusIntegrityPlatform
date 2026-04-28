@@ -2,9 +2,24 @@
 /node_modules
 /frontend/node_modules
 /frontend/dist
+/frontend/cms-dist
+/frontend/cms-index.html
 /src-tauri/target
 .idea/
 *.iml
 *.log
 data/
 backups/
+
+# Local/runtime artifacts
+cookies.txt
+/server-go/server.exe
+/server-go/test_cms.go
+/server-go/sync-repo/
+/server-go/content-repo/content-pack.zip
+/server-go/content-repo/versions.json
+/server-go/content-repo/content.db
+/server-go/content-repo/media/
+/server-go/sync-repo/cms.db
+/src-tauri/content.db
+/src-tauri/manifest.json

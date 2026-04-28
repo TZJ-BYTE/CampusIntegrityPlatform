@@ -2,8 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { contentGetCase, userIsFavorite, userSetFavorite, type ApiResponse, type CaseDetail } from '../api/tauri'
+import MediaPlaceholder from '../components/MediaPlaceholder.vue'
 import { useToastStore } from '../stores/toast'
 import { copyText } from '../utils/copy'
+import { resolveContentAssetUrl } from '../utils/contentAsset'
 import { animatePop } from '../utils/motion'
 
 const route = useRoute()
@@ -14,6 +16,10 @@ const id = computed(() => (route.params.id as string | undefined) ?? '')
 const loading = ref(false)
 const detail = ref<ApiResponse<CaseDetail> | null>(null)
 const isFavorite = ref(false)
+const coverSrc = computed(() => {
+  if (!detail.value?.ok) return undefined
+  return resolveContentAssetUrl(detail.value.data.coverUrl) ?? undefined
+})
 
 const copyBtnEl = ref<HTMLElement | null>(null)
 const favBtnEl = ref<HTMLElement | null>(null)
@@ -83,6 +89,11 @@ async function copyCurrent() {
 
     <div v-if="loading" class="tute-muted">加载中…</div>
     <div v-else-if="detail?.ok" class="detail">
+      <div v-if="coverSrc" class="cover" :style="{ aspectRatio: '21 / 9' }">
+        <img class="coverImg" :src="coverSrc" :alt="detail.data.title" />
+      </div>
+      <MediaPlaceholder v-else kind="image" label="案例封面占位（后续可替换为图片/视频封面）" ratio="21 / 9" />
+
       <div class="title">{{ detail.data.title }}</div>
       <div class="meta">
         <span class="tute-badge gold">{{ detail.data.scene }}</span>
@@ -115,6 +126,20 @@ async function copyCurrent() {
 .wrap {
   display: grid;
   gap: 12px;
+}
+
+.cover {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+}
+
+.coverImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .head {

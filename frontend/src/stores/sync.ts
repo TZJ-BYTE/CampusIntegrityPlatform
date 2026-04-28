@@ -11,6 +11,7 @@ import {
   type SyncRunResult,
   type SyncState,
 } from '../api/tauri'
+import { setServerBaseUrl } from '../utils/serverBaseUrl'
 
 export const useSyncStore = defineStore('sync', {
   state: () => ({
@@ -34,6 +35,7 @@ export const useSyncStore = defineStore('sync', {
       this.sync = await syncGetState()
       if (this.auth.ok) {
         this.serverUrl = this.auth.data.baseUrl ?? ''
+        setServerBaseUrl(this.serverUrl)
       }
     },
     async setServer(baseUrl: string) {
@@ -43,6 +45,7 @@ export const useSyncStore = defineStore('sync', {
         this.auth = r
         if (r.ok) {
           this.serverUrl = r.data.baseUrl ?? ''
+          setServerBaseUrl(this.serverUrl)
           this.message = '已保存服务器地址'
         } else {
           this.message = `${r.error.code} · ${r.error.message}`

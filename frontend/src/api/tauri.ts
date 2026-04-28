@@ -115,6 +115,7 @@ export type VenueListItem = {
   id: string
   name: string
   type: string
+  coverUrl?: string | null
 }
 
 export async function contentListVenues(args: {
@@ -130,6 +131,7 @@ export type VenueDetail = {
   id: string
   name: string
   type: string
+  coverUrl?: string | null
   location?: string | null
   description?: string | null
   contact?: string | null
@@ -147,6 +149,7 @@ export type CaseListItem = {
   title: string
   scene: string
   summary: string
+  coverUrl?: string | null
 }
 
 export type CaseDetail = {
@@ -154,6 +157,7 @@ export type CaseDetail = {
   title: string
   scene: string
   summary: string
+  coverUrl?: string | null
   body: string
   violation?: string | null
   correctAction?: string | null
@@ -177,6 +181,7 @@ export type RegulationListItem = {
   title: string
   level: string
   publishedAt?: string | null
+  coverUrl?: string | null
 }
 
 export type RegulationSection = {
@@ -191,6 +196,7 @@ export type RegulationDetail = {
   id: string
   title: string
   level: string
+  coverUrl?: string | null
   source?: string | null
   publishedAt?: string | null
   sections: RegulationSection[]
@@ -214,11 +220,13 @@ export type StoryListItem = {
   title: string
   source?: string | null
   dayOfYear?: number | null
+  coverUrl?: string | null
 }
 
 export type StoryDetail = {
   id: string
   title: string
+  coverUrl?: string | null
   body: string
   source?: string | null
   dayOfYear?: number | null

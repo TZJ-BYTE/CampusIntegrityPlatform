@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/app'
 import { useContentUpdateStore } from '../stores/contentUpdate'
 import { useSyncStore } from '../stores/sync'
 import { useUiStore } from '../stores/ui'
+import { getServerBaseUrl } from '../utils/serverBaseUrl'
 
 const ui = useUiStore()
 const app = useAppStore()
@@ -81,12 +82,14 @@ function close() {
         <div class="k">内容更新</div>
         <div class="tip">
           <div v-if="contentUpdate.busy">更新中…</div>
+          <div>内容服务器：{{ getServerBaseUrl() }}</div>
           <div>最近尝试：{{ fmtTime(contentUpdate.lastAttemptAt) }}</div>
           <div>最近成功：{{ fmtTime(contentUpdate.lastSuccessAt) }}</div>
         </div>
       </div>
 
       <div class="actions">
+        <button class="tute-btn" type="button" :disabled="contentUpdate.busy" @click="contentUpdate.tick">立即检查更新</button>
         <button class="tute-btn-ghost" type="button" @click="close">关闭</button>
       </div>
     </div>

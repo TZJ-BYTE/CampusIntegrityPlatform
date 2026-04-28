@@ -148,3 +148,17 @@
 
 - 两设备模拟需要便携模式/两份可执行文件；若系统限制同名应用多开，需要改名后运行
 - 用户信息（昵称/头像主色）已纳入同步域；头像图片数据暂不参与同步（仅本机保存）
+
+## 5. 新阶段计划：内容库后台（CMS）
+
+目标：解决“服务器端没有页面无法编辑内容库”的问题，提供一个带单密码锁的 CMS，用于编辑公共内容（法规/故事/场所/案例）并一键发布到客户端内容更新链路。
+
+关键约束：
+- 不做用户管理/角色；只需输入一次密码，之后用会话 cookie 保持登录态
+- 发布产物保持兼容：`versions.json + content-pack.zip`
+
+设计与计划文档：
+- CMS 方案草案：[CMS_DESIGN.md](file:///d:/project/rustproject/CampusIntegrityPlatform/CMS_DESIGN.md)
+- CMS 页面线框：[CMS_WIREFRAMES.md](file:///d:/project/rustproject/CampusIntegrityPlatform/CMS_WIREFRAMES.md)
+- CMS 字段 schema：[CMS_SCHEMA.md](file:///d:/project/rustproject/CampusIntegrityPlatform/CMS_SCHEMA.md)
+- CMS 开发计划（可执行清单）：[CMS_PLAN.md](file:///d:/project/rustproject/CampusIntegrityPlatform/CMS_PLAN.md)

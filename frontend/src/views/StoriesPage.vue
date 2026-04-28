@@ -3,6 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import FeedCard from '../components/FeedCard.vue'
 import FeedLayout from '../components/FeedLayout.vue'
+import coverUrl from '../assets/placeholder-cover.svg'
+import { resolveContentAssetUrl } from '../utils/contentAsset'
 import {
   contentGetTodayStory,
   contentListStories,
@@ -140,6 +142,7 @@ watch(keyword, async () => {
             :meta="today.data.source ?? '—'"
             :title="today.data.title"
             :subtitle="today.data.dayOfYear ? `第 ${today.data.dayOfYear} 天` : ''"
+            :thumb="resolveContentAssetUrl(today.data.coverUrl) ?? coverUrl"
           >
             <div class="clamp3">{{ today.data.body }}</div>
             <template #footer>
@@ -162,6 +165,7 @@ watch(keyword, async () => {
             :meta="s.source ?? '—'"
             :title="s.title"
             :subtitle="s.dayOfYear ? `第 ${s.dayOfYear} 天` : ''"
+            :thumb="resolveContentAssetUrl(s.coverUrl) ?? coverUrl"
             :clickable="true"
             @click="openDetail(s.id)"
           >

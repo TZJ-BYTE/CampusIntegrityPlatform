@@ -5,6 +5,7 @@ import { contentGetVenue, userIsFavorite, userSetFavorite, type ApiResponse, typ
 import MediaPlaceholder from '../components/MediaPlaceholder.vue'
 import { useToastStore } from '../stores/toast'
 import { copyText } from '../utils/copy'
+import { resolveContentAssetUrl } from '../utils/contentAsset'
 import { animatePop } from '../utils/motion'
 
 const route = useRoute()
@@ -15,6 +16,10 @@ const id = computed(() => (route.params.id as string | undefined) ?? '')
 const loading = ref(false)
 const detail = ref<ApiResponse<VenueDetail> | null>(null)
 const isFavorite = ref(false)
+const coverSrc = computed(() => {
+  if (!detail.value?.ok) return undefined
+  return resolveContentAssetUrl(detail.value.data.coverUrl) ?? undefined
+})
 
 const copyBtnEl = ref<HTMLElement | null>(null)
 const favBtnEl = ref<HTMLElement | null>(null)
@@ -84,7 +89,10 @@ async function copyCurrent() {
 
     <div v-if="loading" class="tute-muted">加载中…</div>
     <div v-else-if="detail?.ok" class="detail">
-      <MediaPlaceholder kind="image" label="场所封面占位（后续可替换为照片/视频封面）" ratio="21 / 9" />
+      <div v-if="coverSrc" class="cover" :style="{ aspectRatio: '21 / 9' }">
+        <img class="coverImg" :src="coverSrc" :alt="detail.data.name" />
+      </div>
+      <MediaPlaceholder v-else kind="image" label="场所封面占位（后续可替换为照片/视频封面）" ratio="21 / 9" />
 
       <div class="title">{{ detail.data.name }}</div>
       <div class="meta">
@@ -121,6 +129,20 @@ async function copyCurrent() {
 .wrap {
   display: grid;
   gap: 12px;
+}
+
+.cover {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+}
+
+.coverImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .head {

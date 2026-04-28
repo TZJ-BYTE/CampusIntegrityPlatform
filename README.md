@@ -4,6 +4,7 @@
 
 完整设计方案见 [DESIGN.md](file:///d:/project/rustproject/CampusIntegrityPlatform/DESIGN.md)。
 详细开发进度与后续可执行计划见 [DEVELOPMENT_PLAN.md](file:///d:/project/rustproject/CampusIntegrityPlatform/DEVELOPMENT_PLAN.md)。
+服务端与 CMS 启动、以及“内容如何真正更新到客户端”的操作步骤见 [RUNBOOK_SERVICES.md](file:///d:/project/rustproject/CampusIntegrityPlatform/RUNBOOK_SERVICES.md)。
 
 ## 目标（需求确认）
 

@@ -1,0 +1,824 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>内容库后台（CMS）</title>
+    <style>
+      :root{
+        --bg:#0f0f12;
+        --panel:#14141a;
+        --card:#191922;
+        --text:#f3f3f5;
+        --muted:#a9a9b6;
+        --border:rgba(255,255,255,.10);
+        --primary:#8b1a5c;
+        --primary2:#b11a63;
+        --focus:rgba(139,26,92,.35);
+      }
+      *{box-sizing:border-box}
+      html,body{height:100%;margin:0;font-family:"Microsoft YaHei","PingFang SC",system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
+      a{color:inherit}
+      button,input,textarea,select{font:inherit}
+      .topbar{
+        position:sticky;top:0;z-index:20;
+        height:56px;
+        background:linear-gradient(90deg,var(--primary),#6b1548);
+        border-bottom:1px solid rgba(255,255,255,.10);
+        display:flex;align-items:center;justify-content:space-between;
+        padding:0 14px;gap:12px
+      }
+      .brand{display:flex;align-items:center;gap:10px;font-weight:900}
+      .pill{font-size:12px;font-weight:900;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18)}
+      .actions{display:flex;gap:10px;align-items:center}
+      .btn{
+        border:1px solid var(--border);
+        background:rgba(255,255,255,.06);
+        color:var(--text);
+        border-radius:10px;
+        padding:8px 12px;
+        cursor:pointer;
+        font-weight:900;
+      }
+      .btn:hover{border-color:rgba(255,255,255,.22);background:rgba(255,255,255,.10)}
+      .btn.primary{background:var(--primary);border-color:rgba(255,255,255,.12)}
+      .btn.primary:hover{background:var(--primary2)}
+      .layout{
+        height:calc(100% - 56px);
+        display:grid;
+        grid-template-columns:240px minmax(340px,1fr) minmax(360px,520px);
+        gap:12px;
+        padding:12px;
+      }
+      .panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;min-width:0;overflow:hidden}
+      .panelHeader{padding:12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px}
+      .panelTitle{font-weight:900}
+      .panelBody{padding:12px}
+      .nav{display:grid;gap:8px}
+      .navItem{
+        padding:10px 10px;border-radius:12px;border:1px solid transparent;
+        color:var(--muted);cursor:pointer;font-weight:900;
+        background:transparent;
+      }
+      .navItem.active{color:var(--text);border-color:rgba(139,26,92,.35);background:rgba(139,26,92,.16)}
+      .hint{color:var(--muted);font-size:12px;line-height:1.6}
+      .searchRow{display:flex;gap:10px;align-items:center}
+      .input{
+        width:100%;
+        background:rgba(255,255,255,.06);
+        border:1px solid var(--border);
+        border-radius:12px;
+        padding:10px 12px;
+        color:var(--text);
+        outline:none;
+      }
+      .input:focus{border-color:rgba(139,26,92,.55);box-shadow:0 0 0 3px var(--focus)}
+      .list{display:grid;gap:10px;margin-top:12px}
+      .row{
+        padding:10px 10px;
+        border-radius:14px;
+        border:1px solid var(--border);
+        background:var(--card);
+        cursor:pointer;
+      }
+      .row:hover{border-color:rgba(255,255,255,.22)}
+      .row.active{border-color:rgba(139,26,92,.55);box-shadow:0 0 0 3px rgba(139,26,92,.18)}
+      .rowTitle{font-weight:900}
+      .rowMeta{margin-top:8px;color:var(--muted);font-size:12px;display:flex;gap:8px;flex-wrap:wrap}
+      .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      .field{display:grid;gap:6px;margin-top:10px}
+      .label{color:var(--muted);font-size:12px;font-weight:900}
+      textarea.input{min-height:120px;resize:vertical}
+      .sec{margin-top:12px;border-top:1px solid var(--border);padding-top:12px}
+      .secItem{border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.04);padding:10px;margin-top:10px}
+      .secTop{display:flex;justify-content:space-between;gap:10px;align-items:center}
+      .muted{color:var(--muted);font-size:12px}
+      .loginWrap{max-width:520px;margin:0 auto;padding:30px 12px}
+      .loginCard{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:14px}
+      .loginTitle{font-weight:900;font-size:16px}
+      .footerRow{display:flex;gap:10px;align-items:center;margin-top:12px}
+      .hidden{display:none}
+      .overlay{
+        position:fixed;inset:0;z-index:99;
+        background:rgba(0,0,0,.55);
+        display:grid;place-items:center;
+        padding:16px;
+      }
+      .modal{
+        width:min(560px, 100%);
+        background:var(--panel);
+        border:1px solid var(--border);
+        border-radius:16px;
+        overflow:hidden;
+        box-shadow:0 24px 80px rgba(0,0,0,.55);
+      }
+      .modalHeader{padding:12px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px}
+      .modalTitle{font-weight:900}
+      .modalBody{padding:12px}
+      .toast{
+        position:fixed;left:50%;bottom:16px;transform:translateX(-50%);
+        z-index:120;
+        background:rgba(25,25,34,.96);
+        border:1px solid rgba(255,255,255,.14);
+        border-radius:999px;
+        padding:10px 12px;
+        color:var(--text);
+        font-size:12px;
+        font-weight:900;
+        max-width:min(720px, calc(100% - 24px));
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+      .toast.error{border-color:rgba(217,48,38,.55);background:rgba(217,48,38,.16)}
+      @media (max-width: 1100px){
+        .layout{grid-template-columns:220px 1fr}
+        .editorPanel{display:none}
+      }
+      @media (max-width: 720px){
+        .layout{grid-template-columns:1fr}
+        .navPanel{display:none}
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="brand">
+        <span class="pill">CMS</span>
+        <span>内容库后台</span>
+      </div>
+      <div class="actions">
+        <button id="btnPublish" class="btn" type="button">发布</button>
+        <button id="btnLogout" class="btn" type="button">退出</button>
+      </div>
+    </div>
+    <div id="root"></div>
+
+    <script type="module">
+      const root = document.getElementById('root')
+      const btnLogout = document.getElementById('btnLogout')
+      const btnPublish = document.getElementById('btnPublish')
+
+      const API = {
+        me: '/cms/api/me',
+        login: '/cms/api/login',
+        logout: '/cms/api/logout',
+        regulations: '/cms/api/regulations',
+        regulationDetail: (id) => '/cms/api/regulations/' + encodeURIComponent(id),
+        venues: '/cms/api/venues',
+        venueDetail: (id) => '/cms/api/venues/' + encodeURIComponent(id),
+        cases: '/cms/api/cases',
+        caseDetail: (id) => '/cms/api/cases/' + encodeURIComponent(id),
+        stories: '/cms/api/stories',
+        storyDetail: (id) => '/cms/api/stories/' + encodeURIComponent(id),
+        media: '/cms/api/media',
+        mediaUpload: '/cms/api/media/upload',
+        mediaItem: (id) => '/cms/api/media/' + encodeURIComponent(id),
+        publish: '/cms/api/publish',
+      }
+
+      async function api(url, opts = {}) {
+        const r = await fetch(url, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) } })
+        const contentType = r.headers.get('content-type') || ''
+        const text = await r.text()
+        let json = null
+        try { json = text ? JSON.parse(text) : null } catch { json = null }
+        return { status: r.status, json, text, contentType }
+      }
+
+      function el(tag, attrs = {}, children = []) {
+        const n = document.createElement(tag)
+        for (const [k, v] of Object.entries(attrs)) {
+          if (k === 'class') n.className = v
+          else if (k === 'value') n.value = v
+          else if (k.startsWith('on') && typeof v === 'function') n.addEventListener(k.slice(2).toLowerCase(), v)
+          else n.setAttribute(k, v)
+        }
+        for (const c of children) {
+          if (typeof c === 'string') n.appendChild(document.createTextNode(c))
+          else if (c) n.appendChild(c)
+        }
+        return n
+      }
+
+      function toast(message, kind = 'info') {
+        const t = el('div', { class: 'toast' + (kind === 'error' ? ' error' : '') }, [String(message || '')])
+        document.body.appendChild(t)
+        window.setTimeout(() => t.remove(), 2200)
+      }
+
+      function showModal({ title, body, actions }) {
+        const overlay = el('div', { class: 'overlay' }, [])
+        const modal = el('div', { class: 'modal' }, [])
+        overlay.appendChild(modal)
+        modal.appendChild(el('div', { class: 'modalHeader' }, [
+          el('div', { class: 'modalTitle' }, [title || '']),
+          el('button', { class: 'btn', type: 'button', onclick: () => close(false) }, ['关闭']),
+        ]))
+        const modalBody = el('div', { class: 'modalBody' }, [])
+        modal.appendChild(modalBody)
+        if (body) modalBody.appendChild(body)
+        if (actions) modalBody.appendChild(actions)
+
+        function close(result) {
+          overlay.remove()
+          resolve(result)
+        }
+
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) close(false)
+        })
+
+        document.body.appendChild(overlay)
+        let resolve
+        const p = new Promise((r) => { resolve = r })
+        return { close, promise: p }
+      }
+
+      async function confirmDialog({ title, message, confirmText = '确认' }) {
+        const msg = el('div', { class: 'muted', style: 'line-height:1.7' }, [message || ''])
+        const btnCancel = el('button', { class: 'btn', type: 'button' }, ['取消'])
+        const btnOk = el('button', { class: 'btn primary', type: 'button' }, [confirmText])
+        const actions = el('div', { class: 'footerRow' }, [btnOk, btnCancel])
+        const { close, promise } = showModal({ title, body: msg, actions })
+        btnCancel.onclick = () => close(false)
+        btnOk.onclick = () => close(true)
+        return await promise
+      }
+
+      async function publishDialog() {
+        const version = el('input', { class: 'input', value: String(Date.now()) })
+        const notes = el('textarea', { class: 'input', placeholder: '发布说明（可选）' }, [''])
+        const msg = el('div', { class: 'muted', style: 'margin-top:10px' }, ['版本号必须变化，客户端才会识别为有更新。'])
+        const btnCancel = el('button', { class: 'btn', type: 'button' }, ['取消'])
+        const btnOk = el('button', { class: 'btn primary', type: 'button' }, ['发布'])
+
+        const body = el('div', {}, [
+          el('div', { class: 'field' }, [el('div', { class: 'label' }, ['版本号']), version]),
+          el('div', { class: 'field' }, [el('div', { class: 'label' }, ['发布说明']), notes]),
+          msg,
+        ])
+        const actions = el('div', { class: 'footerRow' }, [btnOk, btnCancel])
+        const { close, promise } = showModal({ title: '发布内容包', body, actions })
+        btnCancel.onclick = () => close(null)
+        btnOk.onclick = () => {
+          const v = String(version.value || '').trim()
+          if (!v) {
+            toast('请输入版本号', 'error')
+            return
+          }
+          close({ version: v, notes: String(notes.value || '').trim() })
+        }
+        return await promise
+      }
+
+      function makeId(prefix) {
+        return prefix + '_' + Math.random().toString(36).slice(2, 10)
+      }
+
+      let selectedId = ''
+      let cachedList = []
+      let currentModule = 'regulations'
+      let cachedMedia = []
+
+      function showLogin() {
+        btnLogout.classList.add('hidden')
+        btnPublish.classList.add('hidden')
+        root.innerHTML = ''
+        const password = el('input', { class: 'input', type: 'password', placeholder: '请输入 CMS 密码' })
+        const remember = el('input', { type: 'checkbox' })
+        const msg = el('div', { class: 'muted', style: 'margin-top:10px' })
+        const submit = el('button', {
+          class: 'btn primary',
+          type: 'button',
+          onclick: async () => {
+            msg.textContent = '登录中…'
+            const { status, json } = await api(API.login, { method: 'POST', body: JSON.stringify({ password: password.value, remember: remember.checked }) })
+            if (status === 200 && json?.ok) {
+              await boot()
+              return
+            }
+            msg.textContent = json?.error || json?.error?.message || '登录失败'
+          },
+        }, ['进入'])
+
+        root.appendChild(
+          el('div', { class: 'loginWrap' }, [
+            el('div', { class: 'loginCard' }, [
+              el('div', { class: 'loginTitle' }, ['CMS 密码保护']),
+              el('div', { class: 'hint', style: 'margin-top:8px' }, ['只需要输入一次密码，后续会使用会话 cookie 保持登录状态。']),
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['密码']), password]),
+              el('div', { class: 'footerRow' }, [
+                submit,
+                el('label', { class: 'muted', style: 'display:flex;gap:8px;align-items:center' }, [remember, '记住我']),
+              ]),
+              msg,
+            ]),
+          ]),
+        )
+      }
+
+      async function fetchList() {
+        const map = { regulations: API.regulations, venues: API.venues, cases: API.cases, stories: API.stories, media: API.media }
+        const { status, json } = await api(map[currentModule])
+        if (status !== 200) throw new Error('unauthorized')
+        return Array.isArray(json) ? json : []
+      }
+
+      async function fetchMedia() {
+        const { status, json } = await api(API.media)
+        if (status !== 200) return []
+        return Array.isArray(json) ? json : []
+      }
+
+      async function showApp() {
+        btnLogout.classList.remove('hidden')
+        btnPublish.classList.remove('hidden')
+        root.innerHTML = ''
+
+        const navPanel = el('div', { class: 'panel navPanel' }, [
+          el('div', { class: 'panelHeader' }, [el('div', { class: 'panelTitle' }, ['内容类型'])]),
+          el('div', { class: 'panelBody nav' }, []),
+        ])
+
+        const listPanel = el('div', { class: 'panel' })
+        const editorPanel = el('div', { class: 'panel editorPanel' })
+        root.appendChild(el('div', { class: 'layout' }, [navPanel, listPanel, editorPanel]))
+
+        const q = el('input', { class: 'input', placeholder: '搜索标题/ID…' })
+        const moduleSelect = el('select', { class: 'input', style: 'width:160px' }, [
+          el('option', { value: 'regulations' }, ['法规']),
+          el('option', { value: 'venues' }, ['场所']),
+          el('option', { value: 'cases' }, ['案例']),
+          el('option', { value: 'stories' }, ['故事']),
+          el('option', { value: 'media' }, ['媒体库']),
+        ])
+        const btnNew = el('button', { class: 'btn', type: 'button' }, ['新建'])
+
+        const listHeader = el('div', { class: 'panelHeader' }, [
+          el('div', { id: 'listTitle', class: 'panelTitle' }, ['列表']),
+          el('div', { style: 'display:flex;gap:10px;align-items:center' }, [moduleSelect, btnNew]),
+        ])
+
+        const listBody = el('div', { class: 'panelBody' }, [
+          el('div', { class: 'searchRow' }, [q]),
+          el('div', { id: 'list', class: 'list' }),
+        ])
+        listPanel.appendChild(listHeader)
+        listPanel.appendChild(listBody)
+
+        q.addEventListener('input', () => renderListUI())
+        moduleSelect.addEventListener('change', async () => {
+          currentModule = moduleSelect.value
+          selectedId = ''
+          await renderAll()
+        })
+
+        const navBody = navPanel.querySelector('.panelBody')
+        const navItems = [
+          { key: 'regulations', label: '法规' },
+          { key: 'venues', label: '场所' },
+          { key: 'cases', label: '案例' },
+          { key: 'stories', label: '故事' },
+          { key: 'media', label: '媒体库' },
+        ].map(x => {
+          const item = el('div', { class: 'navItem' }, [x.label])
+          item.addEventListener('click', async () => {
+            currentModule = x.key
+            selectedId = ''
+            await renderAll()
+          })
+          navBody.appendChild(item)
+          return { ...x, el: item }
+        })
+        navBody.appendChild(el('div', { class: 'hint', style: 'margin-top:10px' }, ['建议先上传媒体，再把 /media/... URL 填到 cover_url。']))
+
+        async function renderList() {
+          cachedList = await fetchList()
+          cachedList.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
+          renderListUI()
+        }
+
+        function renderListUI() {
+          const list = document.getElementById('list')
+          list.innerHTML = ''
+          const keyword = (q.value || '').trim().toLowerCase()
+          const items = cachedList.filter(r => {
+            if (!keyword) return true
+            const t = String(r.title || r.name || '').toLowerCase()
+            const id = String(r.id || '').toLowerCase()
+            return t.includes(keyword) || id.includes(keyword)
+          })
+          if (!items.length) {
+            list.appendChild(el('div', { class: 'muted' }, ['暂无数据']))
+            return
+          }
+          for (const r of items) {
+            if (currentModule === 'media') {
+              const row = el('div', { class: 'row' + (r.id === selectedId ? ' active' : '') }, [
+                el('div', { class: 'rowTitle' }, [r.filename || r.id]),
+                el('div', { class: 'rowMeta' }, [
+                  el('span', {}, ['ID：' + r.id]),
+                  el('span', {}, ['类型：' + (r.mime || '—')]),
+                ]),
+              ])
+              row.addEventListener('click', () => openEditor(r.id))
+              list.appendChild(row)
+              continue
+            }
+            const title = r.title || r.name || r.id
+            const meta = []
+            if (currentModule === 'regulations') meta.push(el('span', {}, ['层级：' + (r.level || '—')]))
+            if (currentModule === 'venues') meta.push(el('span', {}, ['类型：' + (r.type || '—')]))
+            if (currentModule === 'cases') meta.push(el('span', {}, ['场景：' + (r.scene || '—')]))
+            if (currentModule === 'stories') meta.push(el('span', {}, ['来源：' + (r.source || '—')]))
+            meta.push(el('span', {}, ['ID：' + r.id]))
+            const row = el('div', { class: 'row' + (r.id === selectedId ? ' active' : '') }, [
+              el('div', { class: 'rowTitle' }, [title]),
+              el('div', { class: 'rowMeta' }, meta),
+            ])
+            row.addEventListener('click', () => openEditor(r.id))
+            list.appendChild(row)
+          }
+        }
+
+        async function openEditor(id) {
+          selectedId = id
+          renderListUI()
+          const detailMap = {
+            regulations: API.regulationDetail,
+            venues: API.venueDetail,
+            cases: API.caseDetail,
+            stories: API.storyDetail,
+            media: API.mediaItem,
+          }
+          const url = detailMap[currentModule]?.(id)
+          if (!url) {
+            editorPanel.innerHTML = '<div class="panelBody"><div class="muted">当前模块不支持详情加载</div></div>'
+            return
+          }
+          const { status, json, text, contentType } = await api(url)
+          if (status !== 200) {
+            editorPanel.innerHTML = '<div class="panelBody"><div class="muted">加载失败</div></div>'
+            return
+          }
+          if (!json || typeof json !== 'object') {
+            const hint = contentType.includes('text/html')
+              ? '服务端返回了 HTML（通常是路由被反代/重写到 /cms/ 了），所以解析不到 JSON。'
+              : '服务端返回内容不是 JSON。'
+            const preview = (text || '').slice(0, 260).replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+            editorPanel.innerHTML =
+              `<div class="panelBody">` +
+              `<div style="font-weight:900">详情加载异常</div>` +
+              `<div class="muted" style="margin-top:8px">${hint}</div>` +
+              `<div class="muted" style="margin-top:8px">URL：${url}</div>` +
+              `<div class="muted" style="margin-top:8px">Content-Type：${contentType || '—'}</div>` +
+              `<div class="muted" style="margin-top:8px">响应预览：</div>` +
+              `<pre style="white-space:pre-wrap;word-break:break-word;border:1px solid var(--border);border-radius:12px;padding:10px;background:rgba(255,255,255,.04);margin:8px 0 0">${preview || '（空）'}</pre>` +
+              `</div>`
+            return
+          }
+          if (currentModule === 'media') {
+            const m = json
+            editorPanel.innerHTML = ''
+            editorPanel.appendChild(el('div', { class: 'panelHeader' }, [
+              el('div', { class: 'panelTitle' }, ['媒体详情']),
+              el('div', { class: 'muted' }, [m.id || id]),
+            ]))
+            const url = '/media/' + (m.id || id)
+            const img = el('img', { src: url, style: 'width:100%;border-radius:14px;border:1px solid var(--border);background:rgba(255,255,255,.02)' })
+            const copy = el('button', { class: 'btn', type: 'button', onclick: async () => {
+              try { await navigator.clipboard.writeText(url); toast('已复制：' + url) } catch { toast(url) }
+            }}, ['复制 URL'])
+            const del = el('button', { class: 'btn', type: 'button', onclick: async () => {
+              const ok = await confirmDialog({ title: '删除媒体', message: '确认删除该媒体？', confirmText: '删除' })
+              if (!ok) return
+              const { status } = await api(API.mediaItem(id), { method: 'DELETE' })
+              if (status === 200) { selectedId = ''; await renderAll(); }
+              else toast('删除失败', 'error')
+            }}, ['删除'])
+            const body = el('div', { class: 'panelBody' }, [
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['URL']), el('input', { class: 'input', value: url, readonly: 'true' })]),
+              el('div', { class: 'footerRow' }, [copy, del]),
+              img,
+              el('div', { class: 'muted', style: 'margin-top:10px' }, ['提示：把上面的 URL 填到内容的 cover_url 字段即可显示封面。']),
+            ])
+            editorPanel.appendChild(body)
+            return
+          }
+
+          const item = json
+          editorPanel.innerHTML = ''
+          editorPanel.appendChild(el('div', { class: 'panelHeader' }, [
+            el('div', { class: 'panelTitle' }, ['编辑']),
+            el('div', { class: 'muted' }, [item.id || id]),
+          ]))
+
+          const coverUrl = el('input', { class: 'input', value: item.cover_url || '', placeholder: '/media/xxx.png 或 http(s)://...' })
+          const coverPick = el('button', { class: 'btn', type: 'button', onclick: async () => {
+            cachedMedia = await fetchMedia()
+            renderMediaPicker()
+          }}, ['从媒体库选'])
+
+          const mediaPicker = el('div', { class: 'sec', id: 'mediaPick' }, [])
+
+          function renderMediaPicker() {
+            mediaPicker.innerHTML = ''
+            if (!cachedMedia.length) {
+              mediaPicker.appendChild(el('div', { class: 'muted' }, ['媒体库为空：先到“媒体库”上传图片']))
+              return
+            }
+            mediaPicker.appendChild(el('div', { class: 'muted' }, ['点击一项将其 URL 填入 cover_url：']))
+            const wrap = el('div', { style: 'display:grid;gap:10px;margin-top:10px' }, [])
+            for (const m of cachedMedia.slice(0, 8)) {
+              const url = '/media/' + m.id
+              const row = el('div', { class: 'row' }, [
+                el('div', { class: 'rowTitle' }, [m.filename || m.id]),
+                el('div', { class: 'rowMeta' }, [el('span', {}, [url])]),
+              ])
+              row.addEventListener('click', () => { coverUrl.value = url })
+              wrap.appendChild(row)
+            }
+            mediaPicker.appendChild(wrap)
+          }
+
+          const body = el('div', { class: 'panelBody' }, [])
+          body.appendChild(el('div', { class: 'field' }, [
+            el('div', { class: 'label' }, ['封面 cover_url']),
+            el('div', { style: 'display:flex;gap:10px;align-items:center' }, [coverUrl, coverPick]),
+          ]))
+
+          const msg = el('div', { class: 'muted', style: 'margin-top:10px' })
+          function footer(saveFn, delFn) {
+            body.appendChild(el('div', { class: 'footerRow' }, [saveFn, delFn, msg]))
+            body.appendChild(mediaPicker)
+            editorPanel.appendChild(body)
+          }
+
+          if (currentModule === 'venues') {
+            const name = el('input', { class: 'input', value: item.name || '' })
+            const type = el('input', { class: 'input', value: item.type || '' })
+            const location = el('input', { class: 'input', value: item.location || '' })
+            const openHours = el('input', { class: 'input', value: item.open_hours || '' })
+            const contact = el('input', { class: 'input', value: item.contact || '' })
+            const description = el('textarea', { class: 'input' }, [item.description || ''])
+            body.appendChild(el('div', { class: 'grid2' }, [
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['名称']), name]),
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['类型']), type]),
+            ]))
+            body.appendChild(el('div', { class: 'grid2' }, [
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['位置']), location]),
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['开放时间']), openHours]),
+            ]))
+            body.appendChild(el('div', { class: 'field' }, [el('div', { class: 'label' }, ['联系方式']), contact]))
+            body.appendChild(el('div', { class: 'field' }, [el('div', { class: 'label' }, ['介绍']), description]))
+            const save = el('button', { class: 'btn primary', type: 'button', onclick: async () => {
+              msg.textContent = '保存中…'
+              const payload = { id: item.id, name: name.value, type: type.value, cover_url: coverUrl.value, location: location.value, open_hours: openHours.value, contact: contact.value, description: description.value }
+              const { status } = await api(API.venues, { method: 'POST', body: JSON.stringify(payload) })
+              msg.textContent = status === 200 ? '已保存' : '保存失败'
+              await renderList()
+            }}, ['保存'])
+            const del = el('button', { class: 'btn', type: 'button', onclick: async () => {
+              const ok = await confirmDialog({ title: '删除场所', message: '确认删除？', confirmText: '删除' })
+              if (!ok) return
+              const { status } = await api(API.venueDetail(item.id), { method: 'DELETE' })
+              if (status === 200) { selectedId = ''; editorPanel.innerHTML = '<div class="panelBody"><div class="muted">选择一项开始编辑</div></div>'; await renderList() }
+              else toast('删除失败', 'error')
+            }}, ['删除'])
+            footer(save, del)
+            return
+          }
+
+          if (currentModule === 'cases') {
+            const title = el('input', { class: 'input', value: item.title || '' })
+            const scene = el('input', { class: 'input', value: item.scene || '' })
+            const summary = el('textarea', { class: 'input' }, [item.summary || ''])
+            const bodyText = el('textarea', { class: 'input' }, [item.body || ''])
+            const violation = el('textarea', { class: 'input' }, [item.violation || ''])
+            const correct = el('textarea', { class: 'input' }, [item.correct_action || ''])
+            body.appendChild(el('div', { class: 'grid2' }, [
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['标题']), title]),
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['场景']), scene]),
+            ]))
+            body.appendChild(el('div', { class: 'field' }, [el('div', { class: 'label' }, ['摘要']), summary]))
+            body.appendChild(el('div', { class: 'field' }, [el('div', { class: 'label' }, ['正文']), bodyText]))
+            body.appendChild(el('div', { class: 'field' }, [el('div', { class: 'label' }, ['违纪违法点（可选）']), violation]))
+            body.appendChild(el('div', { class: 'field' }, [el('div', { class: 'label' }, ['正确做法（可选）']), correct]))
+            const save = el('button', { class: 'btn primary', type: 'button', onclick: async () => {
+              msg.textContent = '保存中…'
+              const payload = { id: item.id, title: title.value, scene: scene.value, summary: summary.value, cover_url: coverUrl.value, body: bodyText.value, violation: violation.value, correct_action: correct.value }
+              const { status } = await api(API.cases, { method: 'POST', body: JSON.stringify(payload) })
+              msg.textContent = status === 200 ? '已保存' : '保存失败'
+              await renderList()
+            }}, ['保存'])
+            const del = el('button', { class: 'btn', type: 'button', onclick: async () => {
+              const ok = await confirmDialog({ title: '删除案例', message: '确认删除？', confirmText: '删除' })
+              if (!ok) return
+              const { status } = await api(API.caseDetail(item.id), { method: 'DELETE' })
+              if (status === 200) { selectedId = ''; editorPanel.innerHTML = '<div class="panelBody"><div class="muted">选择一项开始编辑</div></div>'; await renderList() }
+              else toast('删除失败', 'error')
+            }}, ['删除'])
+            footer(save, del)
+            return
+          }
+
+          if (currentModule === 'stories') {
+            const title = el('input', { class: 'input', value: item.title || '' })
+            const source = el('input', { class: 'input', value: item.source || '' })
+            const day = el('input', { class: 'input', value: item.day_of_year || '', placeholder: '1-366（可选）' })
+            const bodyText = el('textarea', { class: 'input' }, [item.body || ''])
+            body.appendChild(el('div', { class: 'grid2' }, [
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['标题']), title]),
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['来源（可选）']), source]),
+            ]))
+            body.appendChild(el('div', { class: 'field' }, [el('div', { class: 'label' }, ['day_of_year（可选）']), day]))
+            body.appendChild(el('div', { class: 'field' }, [el('div', { class: 'label' }, ['正文']), bodyText]))
+            const save = el('button', { class: 'btn primary', type: 'button', onclick: async () => {
+              msg.textContent = '保存中…'
+              const payload = { id: item.id, title: title.value, cover_url: coverUrl.value, source: source.value, day_of_year: Number(day.value || 0), body: bodyText.value }
+              const { status } = await api(API.stories, { method: 'POST', body: JSON.stringify(payload) })
+              msg.textContent = status === 200 ? '已保存' : '保存失败'
+              await renderList()
+            }}, ['保存'])
+            const del = el('button', { class: 'btn', type: 'button', onclick: async () => {
+              const ok = await confirmDialog({ title: '删除故事', message: '确认删除？', confirmText: '删除' })
+              if (!ok) return
+              const { status } = await api(API.storyDetail(item.id), { method: 'DELETE' })
+              if (status === 200) { selectedId = ''; editorPanel.innerHTML = '<div class="panelBody"><div class="muted">选择一项开始编辑</div></div>'; await renderList() }
+              else toast('删除失败', 'error')
+            }}, ['删除'])
+            footer(save, del)
+            return
+          }
+
+          if (currentModule === 'regulations') {
+            const title = el('input', { class: 'input', value: item.title || '' })
+            const level = el('input', { class: 'input', value: item.level || '' })
+            const source = el('input', { class: 'input', value: item.source || '' })
+            const publishedAt = el('input', { class: 'input', value: item.published_at || '', placeholder: 'YYYY-MM-DD' })
+            body.appendChild(el('div', { class: 'grid2' }, [
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['标题']), title]),
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['层级']), level]),
+            ]))
+            body.appendChild(el('div', { class: 'grid2' }, [
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['来源']), source]),
+              el('div', { class: 'field' }, [el('div', { class: 'label' }, ['发布日期']), publishedAt]),
+            ]))
+            const secWrap = el('div', { class: 'sec' }, [
+              el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px' }, [
+                el('div', { style: 'font-weight:900' }, ['条款']),
+                el('button', { class: 'btn', type: 'button', onclick: () => {
+                  item.sections = item.sections || []
+                  item.sections.push({ id: makeId('sec'), chapter: '', article_no: '', title: '', body: '', order: item.sections.length + 1 })
+                  renderSections()
+                }}, ['新增条款']),
+              ]),
+              el('div', { id: 'secs' }),
+            ])
+            body.appendChild(secWrap)
+            function renderSections() {
+              const wrap = secWrap.querySelector('#secs')
+              wrap.innerHTML = ''
+              const secs = (item.sections || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0))
+              for (const s of secs) {
+                const chapter = el('input', { class: 'input', value: s.chapter || '', placeholder: '章（可选）' })
+                const articleNo = el('input', { class: 'input', value: s.article_no || '', placeholder: '条号（可选）' })
+                const stitle = el('input', { class: 'input', value: s.title || '', placeholder: '标题（可选）' })
+                const sbody = el('textarea', { class: 'input', placeholder: '正文（必填）' }, [s.body || ''])
+                const del = el('button', { class: 'btn', type: 'button', onclick: () => {
+                  item.sections = (item.sections || []).filter(x => x.id !== s.id)
+                  renderSections()
+                }}, ['删除'])
+                wrap.appendChild(el('div', { class: 'secItem' }, [
+                  el('div', { class: 'secTop' }, [el('div', { style: 'font-weight:900' }, ['条款']), del]),
+                  el('div', { class: 'grid2' }, [
+                    el('div', { class: 'field' }, [el('div', { class: 'label' }, ['章']), chapter]),
+                    el('div', { class: 'field' }, [el('div', { class: 'label' }, ['条号']), articleNo]),
+                  ]),
+                  el('div', { class: 'field' }, [el('div', { class: 'label' }, ['标题']), stitle]),
+                  el('div', { class: 'field' }, [el('div', { class: 'label' }, ['正文']), sbody]),
+                ]))
+                chapter.addEventListener('input', () => s.chapter = chapter.value)
+                articleNo.addEventListener('input', () => s.article_no = articleNo.value)
+                stitle.addEventListener('input', () => s.title = stitle.value)
+                sbody.addEventListener('input', () => s.body = sbody.value)
+              }
+            }
+            renderSections()
+            const save = el('button', { class: 'btn primary', type: 'button', onclick: async () => {
+              msg.textContent = '保存中…'
+              const payload = { id: item.id, title: title.value, level: level.value, cover_url: coverUrl.value, source: source.value, published_at: publishedAt.value, sections: (item.sections || []).map((s, idx) => ({ ...s, order: idx + 1 })) }
+              const { status } = await api(API.regulations, { method: 'POST', body: JSON.stringify(payload) })
+              msg.textContent = status === 200 ? '已保存' : '保存失败'
+              await renderList()
+            }}, ['保存'])
+            const del = el('button', { class: 'btn', type: 'button', onclick: async () => {
+              const ok = await confirmDialog({ title: '删除法规', message: '确认删除？', confirmText: '删除' })
+              if (!ok) return
+              const { status } = await api(API.regulationDetail(item.id), { method: 'DELETE' })
+              if (status === 200) { selectedId = ''; editorPanel.innerHTML = '<div class="panelBody"><div class="muted">选择一项开始编辑</div></div>'; await renderList() }
+              else toast('删除失败', 'error')
+            }}, ['删除'])
+            footer(save, del)
+            return
+          }
+        }
+
+        async function renderAll() {
+          for (const x of navItems) x.el.classList.toggle('active', x.key === currentModule)
+          moduleSelect.value = currentModule
+          document.getElementById('listTitle').textContent = {
+            regulations: '法规列表',
+            venues: '场所列表',
+            cases: '案例列表',
+            stories: '故事列表',
+            media: '媒体库',
+          }[currentModule] || '列表'
+          btnNew.style.display = currentModule === 'media' ? 'none' : ''
+          btnNew.onclick = async () => {
+            if (currentModule === 'regulations') {
+              const id = makeId('reg')
+              const payload = { id, title: '新法规', level: '校内制度', cover_url: '', source: '', published_at: '', sections: [{ id: makeId('sec'), chapter: '', article_no: '第一条', title: '', body: '条款正文', order: 1 }] }
+              const { status } = await api(API.regulations, { method: 'POST', body: JSON.stringify(payload) })
+              if (status !== 200) toast('新建失败', 'error')
+              await renderList(); openEditor(id); return
+            }
+            if (currentModule === 'venues') {
+              const id = makeId('ven')
+              const payload = { id, name: '新场所', type: '廉洁场所', cover_url: '', location: '', description: '', contact: '', open_hours: '' }
+              const { status } = await api(API.venues, { method: 'POST', body: JSON.stringify(payload) })
+              if (status !== 200) toast('新建失败', 'error')
+              await renderList(); openEditor(id); return
+            }
+            if (currentModule === 'cases') {
+              const id = makeId('case')
+              const payload = { id, title: '新案例', scene: '校园', summary: '摘要', cover_url: '', body: '正文', violation: '', correct_action: '' }
+              const { status } = await api(API.cases, { method: 'POST', body: JSON.stringify(payload) })
+              if (status !== 200) toast('新建失败', 'error')
+              await renderList(); openEditor(id); return
+            }
+            if (currentModule === 'stories') {
+              const id = makeId('story')
+              const payload = { id, title: '新故事', cover_url: '', body: '正文', source: '', day_of_year: 0 }
+              const { status } = await api(API.stories, { method: 'POST', body: JSON.stringify(payload) })
+              if (status !== 200) toast('新建失败', 'error')
+              await renderList(); openEditor(id); return
+            }
+          }
+
+          if (currentModule === 'media') {
+            q.placeholder = '搜索文件名/ID…'
+            const list = document.getElementById('list')
+            list.innerHTML = ''
+            const existing = document.getElementById('mediaUploadRow')
+            if (existing) existing.remove()
+            const upload = el('input', { type: 'file', class: 'input' })
+            const btnUp = el('button', { class: 'btn primary', type: 'button', onclick: async () => {
+              const f = upload.files && upload.files[0]
+              if (!f) { toast('请选择文件', 'error'); return }
+              const fd = new FormData()
+              fd.append('file', f)
+              const r = await fetch(API.mediaUpload, { method: 'POST', body: fd })
+              if (r.status === 200) { cachedMedia = await fetchMedia(); await renderList(); toast('上传成功') }
+              else toast('上传失败', 'error')
+            }}, ['上传'])
+            const row = el('div', { id: 'mediaUploadRow', style: 'display:flex;gap:10px;align-items:center;margin-top:12px' }, [upload, btnUp])
+            listBody.insertBefore(row, list)
+          } else {
+            q.placeholder = '搜索标题/ID…'
+            const existing = document.getElementById('mediaUploadRow')
+            if (existing) existing.remove()
+          }
+
+          cachedMedia = await fetchMedia()
+          await renderList()
+          editorPanel.innerHTML = '<div class="panelBody"><div class="muted">选择一项开始编辑</div></div>'
+        }
+
+        await renderAll()
+      }
+
+      btnLogout.addEventListener('click', async () => {
+        await api(API.logout, { method: 'POST', body: '{}' })
+        showLogin()
+      })
+
+      btnPublish.addEventListener('click', async () => {
+        const payload = await publishDialog()
+        if (!payload) return
+        const { status, json } = await api(API.publish, { method: 'POST', body: JSON.stringify(payload) })
+        if (status === 200) toast('已发布：' + (json?.version || payload.version))
+        else toast(json?.error || json?.error?.message || '发布失败', 'error')
+      })
+
+      async function boot() {
+        const { status } = await api(API.me)
+        if (status === 200) return showApp()
+        return showLogin()
+      }
+
+      boot()
+    </script>
+  </body>
+</html>
